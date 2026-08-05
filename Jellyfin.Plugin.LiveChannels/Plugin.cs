@@ -43,7 +43,7 @@ public class Plugin : PluginBase<Plugin, PluginConfiguration>
             return true;
         });
 
-        logger.LogInformation("Live Channels plugin initialized");
+        logger.LogInformation("Live Channels plugin initialized (rcarmo compound-filter build)");
     }
 
     private readonly IApplicationPaths _applicationPaths;
@@ -56,7 +56,7 @@ public class Plugin : PluginBase<Plugin, PluginConfiguration>
 
     /// <inheritdoc />
     public override string Description =>
-        "Build looping virtual TV channels from genres and ratings or hand-picked items, presented natively in Jellyfin's Live TV with no exposed endpoints.";
+        "Build looping virtual TV channels from compound genre, tag and rating filters or hand-picked items, presented natively in Jellyfin's Live TV with no exposed endpoints.";
 
     /// <summary>
     /// Validates incoming configuration before persisting it. The dashboard enforces the same rules in the

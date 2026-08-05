@@ -1,7 +1,7 @@
 ---
 name: "Live Channels"
 guid: "ac6940fb-aac6-4de8-b622-55a662e23658"
-version: "10.11.13.3"
+version: "10.11.13.4"
 targetAbi: "10.11.10.0"
 framework: "net9.0"
 overview: "Build looping virtual TV channels that appear natively in Jellyfin's Live TV."
@@ -10,10 +10,12 @@ description: >
   Jellyfin's Live TV. The channels, their guide, and their streams are all served inside Jellyfin
   itself, so they appear automatically with no tuner to add, no URLs to paste, and no exposed endpoints.
 category: "Live TV"
-imageUrl: "https://raw.githubusercontent.com/JPKribs/jellyfin-plugin-livechannels/refs/heads/master/Jellyfin.Plugin.LiveChannels/Assets/Logo.png"
-owner: "JPKribs"
+imageUrl: "https://gitea.local/rcarmo/jellyfin-plugin-livechannels/raw/branch/master/Jellyfin.Plugin.LiveChannels/Assets/Logo.png"
+owner: "rcarmo (fork of JPKribs)"
 artifacts:
 - "Jellyfin.Plugin.LiveChannels.dll"
 changelog:
   developer:
-  - Bump base to 2026.07.31
+  - Add composable include/exclude tag filters to library and collection sources
+  - Let episodes inherit series tags for dynamic channel matching
+  - Preserve all existing source selection and genre behavior when tag filters are empty

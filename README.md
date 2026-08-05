@@ -1,5 +1,7 @@
 # ![Live Channels](Jellyfin.Plugin.LiveChannels/Assets/Logo.png)
 
+> This Gitea fork adds backward-compatible compound tag filtering to JPKribs' Live Channels plugin. Library and collection sources can include or exclude tags, choose any/all matching, and episodes inherit their series' tags. Existing configurations without tag fields retain their original behaviour.
+
 **Looping virtual TV channels built from your own library and served natively in Jellyfin's Live TV. No separate app, no tuner setup, no URLs to paste.**
 
 ## Why Does This Exist

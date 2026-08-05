@@ -60,6 +60,8 @@ A channel plays the union of one or more **sources**. Each source is one of two 
   * **Blacklist** takes everything except the picked items.
 * **Collection** takes every item in a Jellyfin collection, expanding a series to its episodes.
 
+Every library source also has optional **Tags** filters. Included tags match any tag by default, or every tag with **Match all tags** enabled. Excluded tags always reject an item. Tags refine the selected population, so rules combine as `selection AND genres AND tags`; episodes inherit their series' tags. Empty tag lists preserve the original behaviour.
+
 All channel level filters below still apply on top of every source. Only items with a real media file and a known runtime can be scheduled.
 
 ### Filters

@@ -22,6 +22,10 @@ public partial class ChannelService
     // next guide refresh rather than being cached for the life of the process.
     private readonly ConcurrentDictionary<Guid, ArtworkSet> _seriesArtwork = new();
 
+    // Series tags used by source filters, scoped to one build just like artwork. Looking up only the parents of
+    // candidate episodes also makes tag filtering work for collections, which can span several libraries.
+    private readonly ConcurrentDictionary<Guid, HashSet<string>> _seriesTags = new();
+
     // The item kinds a channel includes, from its Content Types toggles. Episodes are queried when either regular
     // episodes or specials are wanted; the season-0 split between them is applied per item during the build.
     private static BaseItemKind[] BuildKinds(Channel channel)
@@ -132,6 +136,7 @@ public partial class ChannelService
     private IReadOnlyList<ProgramEntry> BuildPrograms(Channel channel)
     {
         _seriesArtwork.Clear();
+        _seriesTags.Clear();
         if (string.Equals(channel.Id, PopularChannelId, StringComparison.Ordinal))
         {
             return ResolvePopularPrograms(channel);
@@ -157,7 +162,7 @@ public partial class ChannelService
         {
             if (source.Kind == SourceKind.Collection)
             {
-                foreach (var item in CollectionItems(source, ratings, kinds))
+                foreach (var item in TagItems(source, CollectionItems(source, ratings, kinds)))
                 {
                     byId[item.Id] = item;
                 }
@@ -247,16 +252,21 @@ public partial class ChannelService
     // stream always agree, and it advances day over day so a channel works through each series across refreshes.
     private static int LoopRotation() => (int)(DateTime.UtcNow - DateTime.UnixEpoch).TotalDays;
 
-    // Resolves one library source to its matching items (before specials/ordering are applied). The
-    // selection mode picks exactly one narrowing: all content, a genre filter, a whitelist, or a blacklist.
+    // Resolves one library source to its matching items (before specials/ordering are applied). The selection
+    // mode picks one base population; tag filters then refine it independently, so genre/item selection AND tags
+    // can be expressed without adding incompatible selection modes. Empty tag lists preserve old configurations.
     private IEnumerable<BaseItem> ResolveSource(LibrarySource source, Guid libraryId, RatingFilter ratings, BaseItemKind[] kinds)
-        => source.Selection switch
+    {
+        var items = source.Selection switch
         {
             SelectionMode.Genre => GenreItems(libraryId, source, ratings, kinds),
             SelectionMode.Whitelist => WhitelistItems(source, ratings, kinds),
             SelectionMode.Blacklist => BlacklistItems(libraryId, source, ratings, kinds),
             _ => QueryLibrary(libraryId, Array.Empty<string>(), ratings, kinds)
         };
+
+        return TagItems(source, items);
+    }
 
     // The library narrowed by genre, matched against each item's own genres and, for an episode, its series'
     // genres too (so a series-level tag like "Anime" matches its episodes even when the episodes are untagged).
@@ -344,6 +354,52 @@ public partial class ChannelService
         }
 
         return set;
+    }
+
+    // Applies tag inclusion/exclusion to the population selected above. Include genres and tags therefore combine
+    // as AND, while each list can independently use any/all semantics. Episodes inherit their parent series tags.
+    private IEnumerable<BaseItem> TagItems(LibrarySource source, IEnumerable<BaseItem> items)
+    {
+        var include = (source.IncludeTags ?? new List<string>()).Where(t => !string.IsNullOrWhiteSpace(t)).ToArray();
+        var exclude = (source.ExcludeTags ?? new List<string>()).Where(t => !string.IsNullOrWhiteSpace(t)).ToArray();
+        if (include.Length == 0 && exclude.Length == 0)
+        {
+            return items;
+        }
+
+        return items.Where(item => PassesTagFilter(
+            EffectiveTags(item),
+            include,
+            source.MatchAllTags,
+            exclude));
+    }
+
+    private HashSet<string> EffectiveTags(BaseItem item)
+    {
+        var tags = new HashSet<string>(item.Tags ?? (IReadOnlyList<string>)Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+        if (item is Episode ep && ep.SeriesId != Guid.Empty)
+        {
+            var inherited = _seriesTags.GetOrAdd(ep.SeriesId, id =>
+            {
+                var series = _libraryManager.GetItemById(id);
+                return new HashSet<string>(series?.Tags ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+            });
+            tags.UnionWith(inherited);
+        }
+
+        return tags;
+    }
+
+    internal static bool PassesTagFilter(
+        IReadOnlySet<string> effectiveTags,
+        IReadOnlyCollection<string> include,
+        bool matchAll,
+        IReadOnlyCollection<string> exclude)
+    {
+        var includeOk = include.Count == 0
+            || (matchAll ? include.All(effectiveTags.Contains) : include.Any(effectiveTags.Contains));
+        var excludeOk = exclude.Count == 0 || !exclude.Any(effectiveTags.Contains);
+        return includeOk && excludeOk;
     }
 
     // The explicitly chosen shows and movies (series expand to their episodes), kept to playable kinds

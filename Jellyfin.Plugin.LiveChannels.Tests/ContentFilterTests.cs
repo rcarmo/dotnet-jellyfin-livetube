@@ -49,4 +49,38 @@ public class ContentFilterTests
 
         Assert.False(ChannelService.PassesStudios(channelStudios, Array.Empty<string>()));
     }
+
+    [Fact]
+    public void PassesTagFilter_EmptyRules_AllowsEverything()
+    {
+        var tags = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        Assert.True(ChannelService.PassesTagFilter(tags, Array.Empty<string>(), false, Array.Empty<string>()));
+    }
+
+    [Fact]
+    public void PassesTagFilter_IncludeAny_IsCaseInsensitive()
+    {
+        var tags = new HashSet<string>(new[] { "Anime", "Cyberpunk" }, StringComparer.OrdinalIgnoreCase);
+
+        Assert.True(ChannelService.PassesTagFilter(tags, new[] { "anime", "manga" }, false, Array.Empty<string>()));
+        Assert.False(ChannelService.PassesTagFilter(tags, new[] { "manga", "mecha" }, false, Array.Empty<string>()));
+    }
+
+    [Fact]
+    public void PassesTagFilter_IncludeAll_RequiresEveryTag()
+    {
+        var tags = new HashSet<string>(new[] { "anime", "cyberpunk" }, StringComparer.OrdinalIgnoreCase);
+
+        Assert.True(ChannelService.PassesTagFilter(tags, new[] { "Anime", "Cyberpunk" }, true, Array.Empty<string>()));
+        Assert.False(ChannelService.PassesTagFilter(tags, new[] { "anime", "mecha" }, true, Array.Empty<string>()));
+    }
+
+    [Fact]
+    public void PassesTagFilter_ExclusionAlwaysWins()
+    {
+        var tags = new HashSet<string>(new[] { "anime", "family" }, StringComparer.OrdinalIgnoreCase);
+
+        Assert.False(ChannelService.PassesTagFilter(tags, new[] { "anime" }, false, new[] { "Family" }));
+    }
 }

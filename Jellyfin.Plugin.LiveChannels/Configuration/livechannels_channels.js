@@ -498,7 +498,7 @@ export default function (view) {
     }
 
     function newSource(libraryId) {
-        return { Kind: 'Library', LibraryId: libraryId || '', LibraryName: libraryId ? libraryName(libraryId) : '', CollectionId: '', CollectionName: '', Genres: [], ExcludeGenres: [], MatchAllGenres: false, Selection: 'AllContent', ItemIds: [], __items: [] };
+        return { Kind: 'Library', LibraryId: libraryId || '', LibraryName: libraryId ? libraryName(libraryId) : '', CollectionId: '', CollectionName: '', Genres: [], ExcludeGenres: [], MatchAllGenres: false, IncludeTags: [], ExcludeTags: [], MatchAllTags: false, Selection: 'AllContent', ItemIds: [], __items: [] };
     }
 
     function renderSources() {
@@ -556,6 +556,16 @@ export default function (view) {
                     '<div class="lc-exclude-mount"></div>' +
                     '<div class="fieldDescription">Content carrying any of these genres is never included, even if it matched above. Series level genres apply to their episodes.</div>' +
                 '</div>' +
+                '<div class="filterSection lc-tags">' +
+                    '<h3 class="jpk-subsection-title">Tags</h3>' +
+                    '<label class="inputLabel">Include</label>' +
+                    '<div class="lc-tag-mount"></div>' +
+                    '<label class="emby-checkbox-label lc-matchall-tags-label"><input type="checkbox" is="emby-checkbox" class="lc-matchall-tags" /><span class="checkboxLabel">Match all tags</span></label>' +
+                    '<div class="fieldDescription">Tags refine the selected content and genre rule. On, content must carry every included tag; off, any one is enough.</div>' +
+                    '<label class="inputLabel">Exclude</label>' +
+                    '<div class="lc-exclude-tag-mount"></div>' +
+                    '<div class="fieldDescription">Any excluded tag rejects the item. Episodes inherit tags from their series.</div>' +
+                '</div>' +
                 '<div class="filterSection lc-items">' +
                     '<input is="emby-input" type="text" class="lc-search" placeholder="Search this library…" />' +
                     '<div class="jpk-table-item-count lc-count"></div>' +
@@ -567,7 +577,8 @@ export default function (view) {
                     '<label class="selectLabel">Collection</label>' +
                     '<select class="lc-source-collection jpk-selector-dropdown"></select>' +
                 '</div>' +
-                '<div class="fieldDescription">Every item in this collection, with series expanded to their episodes. The channel-wide filters still apply.</div>' +
+                '<div class="fieldDescription">Every item in this collection, with series expanded to their episodes. The tag and channel-wide filters still apply.</div>' +
+                '<div class="lc-collection-tag-mount"></div>' +
             '</div>';
 
         // Library selector — the source's library is chosen here, inside the card.
@@ -600,6 +611,21 @@ export default function (view) {
         var matchAll = card.querySelector('.lc-matchall');
         matchAll.checked = !!source.MatchAllGenres;
         matchAll.addEventListener('change', function () { source.MatchAllGenres = matchAll.checked; });
+
+        // Tags independently refine every library selection, allowing compound rules such as genre AND tag.
+        var tagChip = createChipSelect({ placeholder: 'Add a tag…', onChange: function (vals) { source.IncludeTags = vals; } });
+        tagChip.setValue(source.IncludeTags || []);
+        card.querySelector('.lc-tag-mount').appendChild(tagChip.element);
+        var excludeTagChip = createChipSelect({ placeholder: 'Add a tag to exclude…', onChange: function (vals) { source.ExcludeTags = vals; } });
+        excludeTagChip.setValue(source.ExcludeTags || []);
+        card.querySelector('.lc-exclude-tag-mount').appendChild(excludeTagChip.element);
+        function reloadTags() { loadCardTags(source.LibraryId).then(function (names) { tagChip.setAvailable(names); excludeTagChip.setAvailable(names); }); }
+        reloadTags();
+        var matchAllTags = card.querySelector('.lc-matchall-tags');
+        matchAllTags.checked = !!source.MatchAllTags;
+        matchAllTags.addEventListener('change', function () { source.MatchAllTags = matchAllTags.checked; });
+        var tagsSection = card.querySelector('.lc-tags');
+        card.querySelector('.lc-collection-tag-mount').appendChild(tagsSection);
 
         // Items (shown for whitelist/blacklist)
         var itemsSection = card.querySelector('.lc-items');
@@ -783,6 +809,7 @@ export default function (view) {
             var isCollection = kindSelect.value === 'Collection';
             libraryFields.style.display = isCollection ? 'none' : '';
             collectionFields.style.display = isCollection ? '' : 'none';
+            (isCollection ? card.querySelector('.lc-collection-tag-mount') : libraryFields).appendChild(tagsSection);
             titleEl.textContent = isCollection ? 'Collection source' : 'Library source';
             iconEl.textContent = isCollection ? 'video_library' : 'folder';
             if (!isCollection) applySelection();
@@ -798,9 +825,16 @@ export default function (view) {
             source.LibraryId = libSelect.value;
             source.LibraryName = libraryName(source.LibraryId);
             source.Genres = [];
+            source.ExcludeGenres = [];
+            source.IncludeTags = [];
+            source.ExcludeTags = [];
             source.ItemIds = [];
             chip.setValue([]);
+            excludeChip.setValue([]);
+            tagChip.setValue([]);
+            excludeTagChip.setValue([]);
             reloadGenres();
+            reloadTags();
             loaded = false;
             list.innerHTML = '';
             updateCount();
@@ -832,6 +866,13 @@ export default function (view) {
         if (!libraryId) return Promise.resolve([]);
         return ApiClient.getJSON(ApiClient.getUrl('Genres', { ParentId: libraryId, IncludeItemTypes: 'Movie,Series,Episode', Recursive: true, Limit: 500, SortBy: 'SortName' }))
             .then(function (result) { return ((result && result.Items) || []).map(function (g) { return g.Name; }); })
+            .catch(function () { return []; });
+    }
+
+    function loadCardTags(libraryId) {
+        if (!libraryId) return Promise.resolve([]);
+        return ApiClient.getJSON(ApiClient.getUrl('Tags', { ParentId: libraryId, IncludeItemTypes: 'Movie,Series,Episode,MusicVideo,Video', Recursive: true, Limit: 500, SortBy: 'SortName' }))
+            .then(function (result) { return ((result && result.Items) || []).map(function (t) { return t.Name; }); })
             .catch(function () { return []; });
     }
 
