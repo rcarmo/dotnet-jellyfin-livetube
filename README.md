@@ -1,6 +1,6 @@
 # Live Channels — rcarmo fork
 
-This Jellyfin 10.11.x plugin provides looping virtual TV channels, native Live TV delivery, an Android-compatible catch-up catalogue, and authenticated Invidious subscription channels. It runs inside Jellyfin; no external tuner service or client modification is required.
+This Jellyfin 10.11.x plugin provides looping virtual TV channels from your media library or YouTube (via  authenticated Invidious subscription channels), and an Android-compatible catch-up catalogue. It runs inside Jellyfin, so no external tuner service or client modification is required.
 
 This repository is a maintained fork of [JPKribs/jellyfin-plugin-livechannels](https://github.com/JPKribs/jellyfin-plugin-livechannels). The upstream README is preserved as [README.upstream.md](README.upstream.md).
 
