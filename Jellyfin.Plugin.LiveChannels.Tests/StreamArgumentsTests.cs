@@ -36,6 +36,17 @@ public class StreamArgumentsTests
     }
 
     [Fact]
+    public void LocalDashManifest_AllowsOnlyRequiredNestedProtocols()
+    {
+        var a = StreamArguments.Build("/tmp/original.mpd", default, default, 1280, 4000, SoftwareH264, "aac", 192, null);
+
+        var whitelist = a.IndexOf("-protocol_whitelist");
+        Assert.True(whitelist >= 0);
+        Assert.Equal("file,http,https,tcp,tls,crypto,data", a[whitelist + 1]);
+        Assert.True(whitelist < a.IndexOf("-i"));
+    }
+
+    [Fact]
     public void MapsDefaultAudioTrack_ByOrdinal()
     {
         // Honor the audio track Jellyfin marks as default (here the third audio stream) instead of letting ffmpeg

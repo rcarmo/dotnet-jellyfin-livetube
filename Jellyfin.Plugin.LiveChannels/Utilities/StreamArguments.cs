@@ -197,6 +197,15 @@ public static class StreamArguments
             Add(args, "-readrate", RealtimeReadRate);
         }
 
+        // A locally filtered DASH manifest still references remote HTTP media fragments. ffmpeg's file input
+        // restricts nested protocols by default, so explicitly allow only the protocols this MPD needs.
+        if (path.EndsWith(".mpd", StringComparison.OrdinalIgnoreCase)
+            && !path.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+            && !path.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            Add(args, "-protocol_whitelist", "file,http,https,tcp,tls,crypto,data");
+        }
+
         args.Add("-i");
         args.Add(path);
 
