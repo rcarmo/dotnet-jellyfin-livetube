@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using Jellyfin.Data.Enums;
 using Jellyfin.Plugin.LiveChannels.Models;
 using Jellyfin.Plugin.LiveChannels.Utilities;
@@ -20,6 +21,7 @@ public partial class ChannelService
     // Series artwork memoised for the duration of one build, so a series contributing dozens of episodes is
     // loaded once rather than per episode. Cleared when a build starts, so a metadata refresh is picked up by the
     // next guide refresh rather than being cached for the life of the process.
+    private static readonly string[] InvidiousGenres = { "YouTube" };
     private readonly ConcurrentDictionary<Guid, ArtworkSet> _seriesArtwork = new();
 
     // Series tags used by source filters, scoped to one build just like artwork. Looking up only the parents of
@@ -157,9 +159,16 @@ public partial class ChannelService
         }
 
         var byId = new Dictionary<Guid, BaseItem>();
+        var externalEntries = new List<ProgramEntry>();
         var libraryIds = new List<Guid>();
         foreach (var source in channel.Sources)
         {
+            if (source.Kind == SourceKind.InvidiousFeed)
+            {
+                externalEntries.AddRange(ResolveInvidiousFeed(source));
+                continue;
+            }
+
             if (source.Kind == SourceKind.Collection)
             {
                 foreach (var item in TagItems(source, CollectionItems(source, ratings, kinds)))
@@ -195,7 +204,7 @@ public partial class ChannelService
             ? ResolvePeopleAllowed(channel.People, filterScope, kinds)
             : null;
 
-        var entries = new List<ProgramEntry>();
+        var entries = new List<ProgramEntry>(externalEntries);
         foreach (var item in byId.Values)
         {
             if (item is Episode ep)
@@ -245,6 +254,52 @@ public partial class ChannelService
             LoopRotation());
 
         return ProgramLoopBuilder.Build(entries, options);
+    }
+
+    private IReadOnlyList<ProgramEntry> ResolveInvidiousFeed(LibrarySource source)
+    {
+        var token = Environment.GetEnvironmentVariable("LIVECHANNELS_INVIDIOUS_TOKEN");
+        if (string.IsNullOrWhiteSpace(token) || string.IsNullOrWhiteSpace(source.InvidiousUrl))
+        {
+            _logger.LogWarning("Live Channels: Invidious source is missing its URL or LIVECHANNELS_INVIDIOUS_TOKEN");
+            return Array.Empty<ProgramEntry>();
+        }
+
+        try
+        {
+            var maximum = source.InvidiousMaximumResults <= 0 ? 50 : Math.Min(source.InvidiousMaximumResults, 200);
+            var videos = _invidious.GetFeedAsync(source.InvidiousUrl, token, maximum, CancellationToken.None).GetAwaiter().GetResult();
+            return videos
+                .Where(v => !string.IsNullOrWhiteSpace(v.VideoId) && v.LengthSeconds > 0)
+                .Select(v => new ProgramEntry(
+                    StableInvidiousId(v.VideoId),
+                    string.IsNullOrWhiteSpace(v.Author) ? v.Title : v.Author + " - " + v.Title,
+                    null,
+                    TimeSpan.FromSeconds(v.LengthSeconds).Ticks,
+                    v.VideoId)
+                {
+                    IsInvidious = true,
+                    InvidiousUrl = source.InvidiousUrl,
+                    RawName = v.Title,
+                    SeriesName = v.Author,
+                    DateAdded = v.PublishedUtc ?? DateTime.UnixEpoch,
+                    PremiereDate = v.PublishedUtc,
+                    ThumbImagePath = v.VideoThumbnails.OrderByDescending(t => t.Width * t.Height).FirstOrDefault()?.Url,
+                    Genres = InvidiousGenres
+                })
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Live Channels: could not read the Invidious subscription feed from {Url}", source.InvidiousUrl);
+            return Array.Empty<ProgramEntry>();
+        }
+    }
+
+    private static Guid StableInvidiousId(string videoId)
+    {
+        var hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes("invidious:" + videoId));
+        return new Guid(hash.AsSpan(0, 16));
     }
 
     // A rotation counter (days since the Unix epoch) that advances which single block each series contributes to a

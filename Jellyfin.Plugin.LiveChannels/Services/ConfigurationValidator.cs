@@ -58,7 +58,21 @@ public static class ConfigurationValidator
 
             if (channel.Sources is null || channel.Sources.Count == 0)
             {
-                throw new ArgumentException("Enabled channel has no library sources: " + Describe(channel));
+                throw new ArgumentException("Enabled channel has no sources: " + Describe(channel));
+            }
+
+            foreach (var source in channel.Sources.Where(s => s.Kind == SourceKind.InvidiousFeed))
+            {
+                if (!Uri.TryCreate(source.InvidiousUrl, UriKind.Absolute, out var uri)
+                    || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+                {
+                    throw new ArgumentException("Invidious source needs an absolute HTTP or HTTPS URL: " + Describe(channel));
+                }
+
+                if (source.InvidiousMaximumResults is < 1 or > 200)
+                {
+                    throw new ArgumentException("Invidious maximum results must be between 1 and 200: " + Describe(channel));
+                }
             }
 
             // Two enabled channels with the same number collide in the Live TV guide, so reject duplicates.

@@ -9,5 +9,8 @@ public enum SourceKind
     Library = 0,
 
     /// <summary>A collection (box set); its members are used, expanding series to their episodes.</summary>
-    Collection = 1
+    Collection = 1,
+
+    /// <summary>The authenticated subscription feed of one Invidious account.</summary>
+    InvidiousFeed = 2
 }

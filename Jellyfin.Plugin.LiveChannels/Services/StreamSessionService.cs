@@ -97,12 +97,13 @@ public class StreamSessionService
         var videoCodec = Plugin.Instance?.ReadConfiguration(c => c.VideoCodec) ?? Models.VideoCodec.H264;
         var usesHwUpload = _encoders.ResolveVideo(videoCodec, allowHardware: true).PixelStage.Contains("hwupload", StringComparison.Ordinal);
         var highRes = programs.Any(p => p.SourceHeight > 1080);
+        var hasInvidious = programs.Any(p => p.IsInvidious);
 
         // Whether any item is HDR (which forces the per-item tone-map path). Each item's HDR flag is probed once at
         // guide refresh and cached on the schedule entry, so this is a pure in-memory scan with no media-stream
         // queries on the tune-in critical path. The short-circuit skips even the scan when the channel is
         // already per-item for another reason (burn-in, a >1080p item, or a GPU-upload encoder).
-        var alreadyPerItem = channel.SubtitleBurnIn != Models.SubtitleBurnInMode.Never || highRes || usesHwUpload;
+        var alreadyPerItem = channel.SubtitleBurnIn != Models.SubtitleBurnInMode.Never || highRes || usesHwUpload || hasInvidious;
         var hasHdr = !alreadyPerItem && programs.Any(p => p.IsHdr);
         var perItem = alreadyPerItem || hasHdr || timeOfDay;
         var uniform = programs.Count > 0 && programs[0].SourceHeight > 0 && programs.All(p => p.SourceHeight == programs[0].SourceHeight);
@@ -494,12 +495,15 @@ public class StreamSessionService
     // the next item's timeline from.
     private async Task<(bool Streamed, double EndSeconds)> StreamItemAsync(string ffmpeg, Channel channel, ProgramEntry program, TimeSpan offset, TimeSpan timeline, Stream output, Func<double> burstSeconds, CancellationToken cancellationToken, SessionStats? stats = null, TimeSpan? durationLimit = null)
     {
-        if (string.IsNullOrEmpty(program.Path) || !File.Exists(program.Path))
+        if (string.IsNullOrEmpty(program.Path) || (!program.IsInvidious && !File.Exists(program.Path)))
         {
             _logger.LogWarning("Skipping missing media for {Title}", program.Title);
             return (false, -1);
         }
 
+        var input = program.IsInvidious
+            ? InvidiousFeedClient.BuildDashUrl(program.InvidiousUrl ?? string.Empty, program.Path)
+            : program.Path;
         var subtitle = ChannelService.FindBurnInSubtitle(program, channel.SubtitleBurnIn);
 
         // Burn the file Jellyfin extracted into its own subtitle cache, the same source its transcodes burn, not
@@ -531,7 +535,7 @@ public class StreamSessionService
             }
         }
 
-        var (args, hardwareDecode) = BuildArguments(program.Path, offset, timeline, subtitle, program.SourceHeight, subtitlePath, softwareDecode: false, program.IsHdr, program.DefaultAudioOrdinal, burstSeconds(), durationLimit, subtitleFonts);
+        var (args, hardwareDecode) = BuildArguments(input, offset, timeline, subtitle, program.SourceHeight, subtitlePath, softwareDecode: false, program.IsHdr, program.DefaultAudioOrdinal, burstSeconds(), durationLimit, subtitleFonts);
         var (total, lastOut, exitCode) = await RunFfmpegAsync(ffmpeg, args, program.Title, output, cancellationToken, stats).ConfigureAwait(false);
 
         // The per-item path has no continuous decoder to fall back, so retry a hardware-decode that produced
@@ -539,7 +543,7 @@ public class StreamSessionService
         if (total == 0 && hardwareDecode && !cancellationToken.IsCancellationRequested)
         {
             _logger.LogWarning("Channel {Name}: hardware decode produced no output for \"{Title}\"; retrying in software", channel.Name, program.Title);
-            var (swArgs, _) = BuildArguments(program.Path, offset, timeline, subtitle, program.SourceHeight, subtitlePath, softwareDecode: true, program.IsHdr, program.DefaultAudioOrdinal, burstSeconds(), durationLimit, subtitleFonts);
+            var (swArgs, _) = BuildArguments(input, offset, timeline, subtitle, program.SourceHeight, subtitlePath, softwareDecode: true, program.IsHdr, program.DefaultAudioOrdinal, burstSeconds(), durationLimit, subtitleFonts);
             (total, lastOut, exitCode) = await RunFfmpegAsync(ffmpeg, swArgs, program.Title, output, cancellationToken, stats).ConfigureAwait(false);
         }
 

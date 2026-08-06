@@ -59,6 +59,14 @@ public class InvidiousFeedClientTests
         Assert.Equal("https://img.test/abc123.jpg", Assert.Single(video.VideoThumbnails).Url);
     }
 
+    [Fact]
+    public void BuildDashUrl_UsesStableVideoIdAndLocalProxy()
+    {
+        Assert.Equal(
+            "http://invidious.test/api/manifest/dash/id/abc123?local=true",
+            InvidiousFeedClient.BuildDashUrl("http://invidious.test", "abc123"));
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("not-a-url")]

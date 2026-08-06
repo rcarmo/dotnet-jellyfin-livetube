@@ -1,3 +1,4 @@
+using System.Net.Http;
 using Jellyfin.Plugin.LiveChannels.Services;
 using JPKribs.Jellyfin.Base;
 using MediaBrowser.Controller;
@@ -17,6 +18,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
     /// <inheritdoc />
     public void RegisterServices(IServiceCollection serviceCollection, IServerApplicationHost applicationHost)
     {
+        serviceCollection.AddSingleton(_ => new InvidiousFeedClient(new HttpClient()));
         serviceCollection.AddSingleton<ChannelService>();
         serviceCollection.AddSingleton<EncoderResolver>();
         serviceCollection.AddSingleton<StreamSessionService>();

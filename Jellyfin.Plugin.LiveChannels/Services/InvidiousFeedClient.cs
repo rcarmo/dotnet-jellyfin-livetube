@@ -59,6 +59,21 @@ public sealed class InvidiousFeedClient
         return feed is null ? Array.Empty<InvidiousFeedVideo>() : feed.Videos;
     }
 
+    /// <summary>Builds the local Invidious DASH manifest URL for one stable video id.</summary>
+    /// <param name="instanceUrl">The instance root URL.</param>
+    /// <param name="videoId">The stable YouTube video id.</param>
+    /// <returns>A just-in-time DASH manifest URL.</returns>
+    public static string BuildDashUrl(string instanceUrl, string videoId)
+    {
+        var root = ParseInstanceUrl(instanceUrl);
+        if (string.IsNullOrWhiteSpace(videoId))
+        {
+            throw new ArgumentException("An Invidious video id is required.", nameof(videoId));
+        }
+
+        return new Uri(root, "api/manifest/dash/id/" + Uri.EscapeDataString(videoId.Trim()) + "?local=true").ToString();
+    }
+
     private static Uri ParseInstanceUrl(string instanceUrl)
     {
         if (!Uri.TryCreate(instanceUrl, UriKind.Absolute, out var root)

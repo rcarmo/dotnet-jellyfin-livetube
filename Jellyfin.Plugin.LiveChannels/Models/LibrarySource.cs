@@ -24,6 +24,12 @@ public class LibrarySource
     /// <summary>Gets or sets the collection display name, kept for the admin UI.</summary>
     public string CollectionName { get; set; } = string.Empty;
 
+    /// <summary>Gets or sets the Invidious instance root URL. Used when <see cref="Kind"/> is <see cref="SourceKind.InvidiousFeed"/>.</summary>
+    public string InvidiousUrl { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets how many recent subscription-feed items to request. The feed token is read from the <c>LIVECHANNELS_INVIDIOUS_TOKEN</c> process environment variable and is never persisted here.</summary>
+    public int InvidiousMaximumResults { get; set; } = 50;
+
     /// <summary>Gets or sets the genres the library is filtered by. Empty means no genre filter.</summary>
     public List<string> Genres { get; set; } = new();
 

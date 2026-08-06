@@ -36,8 +36,14 @@ public sealed class ProgramEntry
     /// <summary>Gets the runtime in ticks.</summary>
     public long DurationTicks { get; }
 
-    /// <summary>Gets the media file path, or <c>null</c>.</summary>
+    /// <summary>Gets the local media path, or the stable external video id for an Invidious programme.</summary>
     public string? Path { get; }
+
+    /// <summary>Gets a value indicating whether <see cref="Path"/> is an Invidious video id that must be resolved immediately before playback.</summary>
+    public bool IsInvidious { get; init; }
+
+    /// <summary>Gets the Invidious instance root URL used to resolve this programme.</summary>
+    public string? InvidiousUrl { get; init; }
 
     /// <summary>Gets the production year, used for the guide's <c>date</c>.</summary>
     public int? Year { get; init; }
