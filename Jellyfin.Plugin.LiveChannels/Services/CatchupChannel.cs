@@ -66,7 +66,7 @@ public sealed class CatchupChannel : IChannel, IDisableMediaSourceDisplay
             DefaultSortFields = new List<ChannelItemSortField> { ChannelItemSortField.DateCreated },
             SupportsSortOrderToggle = false,
             SupportsContentDownloading = false,
-            AutoRefreshLevels = 1
+            AutoRefreshLevels = 2
         };
 
     /// <inheritdoc />
