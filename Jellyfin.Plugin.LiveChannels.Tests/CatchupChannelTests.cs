@@ -26,7 +26,7 @@ public sealed class CatchupChannelTests
         };
         var slot = new ScheduledProgram(program, start, start.AddMinutes(42));
 
-        var item = CatchupChannel.BuildLocalItem("channel-1", slot);
+        var item = CatchupChannel.BuildItem("channel-1", slot);
 
         Assert.Equal(ChannelItemType.Media, item.Type);
         Assert.Equal(ChannelMediaType.Video, item.MediaType);
@@ -34,7 +34,7 @@ public sealed class CatchupChannelTests
         Assert.Equal(program.DurationTicks, item.RunTimeTicks);
         Assert.Equal("/art/thumb.jpg", item.ImageUrl);
         Assert.Empty(item.MediaSources);
-        var source = CatchupChannel.BuildLocalMediaSource("channel-1", slot);
+        var source = CatchupChannel.BuildMediaSource("channel-1", slot, "/media/example.mkv");
         Assert.Equal("/media/example.mkv", source.Path);
         Assert.Equal(MediaProtocol.File, source.Protocol);
         Assert.False(source.IsInfiniteStream);

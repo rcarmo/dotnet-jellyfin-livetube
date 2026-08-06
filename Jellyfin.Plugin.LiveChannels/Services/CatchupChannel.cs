@@ -30,16 +30,19 @@ public sealed class CatchupChannel : IChannel, IDisableMediaSourceDisplay, IRequ
     private readonly ChannelService _channels;
     private readonly ILibraryManager _libraryManager;
     private readonly IUserManager _userManager;
+    private readonly InvidiousCatchupCache _invidiousCache;
 
     /// <summary>Initializes the catch-up catalogue.</summary>
-    public CatchupChannel(ChannelService channels, ILibraryManager libraryManager, IUserManager userManager)
+    public CatchupChannel(ChannelService channels, ILibraryManager libraryManager, IUserManager userManager, InvidiousCatchupCache invidiousCache)
     {
         ArgumentNullException.ThrowIfNull(channels);
         ArgumentNullException.ThrowIfNull(libraryManager);
         ArgumentNullException.ThrowIfNull(userManager);
+        ArgumentNullException.ThrowIfNull(invidiousCache);
         _channels = channels;
         _libraryManager = libraryManager;
         _userManager = userManager;
+        _invidiousCache = invidiousCache;
     }
 
     /// <inheritdoc />
@@ -110,19 +113,15 @@ public sealed class CatchupChannel : IChannel, IDisableMediaSourceDisplay, IRequ
         var programmes = _channels.ResolvePrograms(channel);
         var timeline = _channels.BuildTimeline(channel, programmes, now - History, now.AddSeconds(1));
         var items = timeline
-            .Where(slot => slot.Start <= now
-                && !slot.Program.IsInvidious
-                && !string.IsNullOrEmpty(slot.Program.Path)
-                && File.Exists(slot.Program.Path)
-                && _libraryManager.GetItemById(slot.Program.ItemId)?.IsVisible(user) == true)
+            .Where(slot => slot.Start <= now && IsVisible(slot.Program, user))
             .OrderByDescending(slot => slot.Start)
-            .Select(slot => BuildLocalItem(channel.Id, slot))
+            .Select(slot => BuildItem(channel.Id, slot))
             .ToList();
         return Task.FromResult(Result(items));
     }
 
     /// <inheritdoc />
-    public Task<IEnumerable<MediaSourceInfo>> GetChannelItemMediaInfo(string id, CancellationToken cancellationToken)
+    public async Task<IEnumerable<MediaSourceInfo>> GetChannelItemMediaInfo(string id, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var now = DateTime.UtcNow;
@@ -131,13 +130,24 @@ public sealed class CatchupChannel : IChannel, IDisableMediaSourceDisplay, IRequ
             var programmes = _channels.ResolvePrograms(channel);
             var slot = _channels.BuildTimeline(channel, programmes, now - History, now.AddSeconds(1))
                 .FirstOrDefault(candidate => string.Equals(ItemId(channel.Id, candidate.Start, candidate.Program.ItemId).ToString("N", CultureInfo.InvariantCulture), id, StringComparison.OrdinalIgnoreCase));
-            if (slot is not null && !slot.Program.IsInvidious && !string.IsNullOrEmpty(slot.Program.Path) && File.Exists(slot.Program.Path))
+            if (slot is null)
             {
-                return Task.FromResult<IEnumerable<MediaSourceInfo>>(new[] { BuildLocalMediaSource(channel.Id, slot) });
+                continue;
+            }
+
+            if (!slot.Program.IsInvidious && !string.IsNullOrEmpty(slot.Program.Path) && File.Exists(slot.Program.Path))
+            {
+                return new[] { BuildMediaSource(channel.Id, slot, slot.Program.Path) };
+            }
+
+            if (slot.Program.IsInvidious && !string.IsNullOrEmpty(slot.Program.Path) && !string.IsNullOrEmpty(slot.Program.InvidiousUrl))
+            {
+                var path = await _invidiousCache.MaterializeAsync(slot.Program.InvidiousUrl, slot.Program.Path, cancellationToken).ConfigureAwait(false);
+                return new[] { BuildMediaSource(channel.Id, slot, path) };
             }
         }
 
-        return Task.FromResult<IEnumerable<MediaSourceInfo>>(Array.Empty<MediaSourceInfo>());
+        return Array.Empty<MediaSourceInfo>();
     }
 
     /// <inheritdoc />
@@ -147,10 +157,10 @@ public sealed class CatchupChannel : IChannel, IDisableMediaSourceDisplay, IRequ
     /// <inheritdoc />
     public IEnumerable<ImageType> GetSupportedChannelImages() => Array.Empty<ImageType>();
 
-    internal static ChannelItemInfo BuildLocalItem(string channelId, ScheduledProgram slot)
+    internal static ChannelItemInfo BuildItem(string channelId, ScheduledProgram slot)
     {
         var program = slot.Program;
-        var path = program.Path ?? throw new ArgumentException("A local catch-up programme needs a media path.", nameof(slot));
+        var sourceKey = program.Path ?? throw new ArgumentException("A catch-up programme needs a media identity.", nameof(slot));
         return new ChannelItemInfo
         {
             Id = ItemId(channelId, slot.Start, program.ItemId).ToString("N", CultureInfo.InvariantCulture),
@@ -174,14 +184,14 @@ public sealed class CatchupChannel : IChannel, IDisableMediaSourceDisplay, IRequ
             Genres = program.Genres.ToList(),
             ImageUrl = program.ThumbImagePath ?? program.PrimaryImagePath,
             MediaSources = new List<MediaSourceInfo>(),
-            Etag = Hash(string.Join('|', "v3", path, program.DurationTicks.ToString(CultureInfo.InvariantCulture), slot.Start.Ticks.ToString(CultureInfo.InvariantCulture)))
+            Etag = Hash(string.Join('|', "v4", sourceKey, program.DurationTicks.ToString(CultureInfo.InvariantCulture), slot.Start.Ticks.ToString(CultureInfo.InvariantCulture)))
         };
     }
 
-    internal static MediaSourceInfo BuildLocalMediaSource(string channelId, ScheduledProgram slot)
+    internal static MediaSourceInfo BuildMediaSource(string channelId, ScheduledProgram slot, string path)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
         var program = slot.Program;
-        var path = program.Path ?? throw new ArgumentException("A local catch-up programme needs a media path.", nameof(slot));
         return new MediaSourceInfo
         {
             Id = ItemId(channelId, slot.Start, program.ItemId).ToString("N", CultureInfo.InvariantCulture),
@@ -196,6 +206,12 @@ public sealed class CatchupChannel : IChannel, IDisableMediaSourceDisplay, IRequ
             Container = Path.GetExtension(path).TrimStart('.')
         };
     }
+
+    private bool IsVisible(ProgramEntry program, Jellyfin.Database.Implementations.Entities.User user)
+        => program.IsInvidious
+            ? !string.IsNullOrEmpty(program.Path) && !string.IsNullOrEmpty(program.InvidiousUrl)
+            : !string.IsNullOrEmpty(program.Path) && File.Exists(program.Path)
+                && _libraryManager.GetItemById(program.ItemId)?.IsVisible(user) == true;
 
     internal static Guid FolderId(string channelId) => StableId("catchup-folder:" + channelId);
 
