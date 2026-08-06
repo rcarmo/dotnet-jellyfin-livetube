@@ -6,6 +6,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using MediaBrowser.Common.Configuration;
+using MediaBrowser.Controller;
 
 namespace Jellyfin.Plugin.LiveChannels.Services;
 
@@ -16,17 +17,21 @@ public sealed record InvidiousCatchupManifestResult(string Path, string? AudioLa
 public sealed class InvidiousCatchupManifest
 {
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> Gates = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, string> _published = new(StringComparer.Ordinal);
     private static readonly TimeSpan MaximumAge = TimeSpan.FromMinutes(4);
     private static readonly TimeSpan CleanupAge = TimeSpan.FromHours(1);
     private readonly InvidiousFeedClient _invidious;
+    private readonly IServerApplicationHost _applicationHost;
     private readonly string _root;
 
     /// <summary>Initializes the manifest store.</summary>
-    public InvidiousCatchupManifest(InvidiousFeedClient invidious, IApplicationPaths paths)
+    public InvidiousCatchupManifest(InvidiousFeedClient invidious, IApplicationPaths paths, IServerApplicationHost applicationHost)
     {
         ArgumentNullException.ThrowIfNull(invidious);
         ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(applicationHost);
         _invidious = invidious;
+        _applicationHost = applicationHost;
         _root = Path.Combine(paths.CachePath, "livechannels-assets", "catchup-manifests");
     }
 
@@ -47,7 +52,7 @@ public sealed class InvidiousCatchupManifest
             var media = await _invidious.ResolveOriginalPlaybackMediaAsync(instanceUrl, videoId, cancellationToken).ConfigureAwait(false);
             if (File.Exists(destination) && DateTime.UtcNow - File.GetLastWriteTimeUtc(destination) < MaximumAge)
             {
-                return new InvidiousCatchupManifestResult(destination, media.AudioLanguage, media.VideoHeight);
+                return Publish(destination, media);
             }
 
             var temporary = destination + "." + Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture) + ".tmp";
@@ -61,7 +66,7 @@ public sealed class InvidiousCatchupManifest
 
                 File.Move(temporary, destination, overwrite: true);
                 Cleanup(_root, CleanupAge, destination);
-                return new InvidiousCatchupManifestResult(destination, media.AudioLanguage, media.VideoHeight);
+                return Publish(destination, media);
             }
             finally
             {
@@ -72,6 +77,17 @@ public sealed class InvidiousCatchupManifest
         {
             gate.Release();
         }
+    }
+
+    /// <summary>Resolves an opaque, short-lived HTTP publication token to its control manifest.</summary>
+    public string? ResolvePublishedPath(string token)
+    {
+        if (string.IsNullOrWhiteSpace(token) || token.Length != 32 || token.Any(character => !char.IsAsciiHexDigit(character)))
+        {
+            return null;
+        }
+
+        return _published.TryGetValue(token, out var path) ? path : null;
     }
 
     internal static void Cleanup(string root, TimeSpan maximumAge, string protectedPath)
@@ -89,6 +105,15 @@ public sealed class InvidiousCatchupManifest
                 TryDelete(file.FullName);
             }
         }
+    }
+
+    private InvidiousCatchupManifestResult Publish(string path, InvidiousPlaybackMedia media)
+    {
+        var existing = _published.FirstOrDefault(entry => string.Equals(entry.Value, path, StringComparison.Ordinal));
+        var token = string.IsNullOrEmpty(existing.Key) ? Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture) : existing.Key;
+        _published[token] = path;
+        var url = _applicationHost.GetApiUrlForLocalAccess() + "/livechannels/catchup-manifest/" + token + ".mpd";
+        return new InvidiousCatchupManifestResult(url, media.AudioLanguage, media.VideoHeight);
     }
 
     private static string SanitizeVideoId(string videoId)

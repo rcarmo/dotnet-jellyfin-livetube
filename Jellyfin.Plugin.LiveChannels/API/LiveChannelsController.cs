@@ -22,6 +22,7 @@ public class LiveChannelsController : ControllerBase
     private readonly EncoderResolver _encoders;
     private readonly LiveChannelsTvService _tv;
     private readonly StressTestService _stress;
+    private readonly InvidiousCatchupManifest _catchupManifest;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="LiveChannelsController"/> class.
@@ -29,11 +30,27 @@ public class LiveChannelsController : ControllerBase
     /// <param name="encoders">The encoder resolver, used to report the active hardware acceleration.</param>
     /// <param name="tv">The Live TV service, which owns the active channel streams.</param>
     /// <param name="stress">The encoder stress test the settings page can run.</param>
-    public LiveChannelsController(EncoderResolver encoders, LiveChannelsTvService tv, StressTestService stress)
+    /// <param name="catchupManifest">The short-lived remote catch-up manifest publisher.</param>
+    public LiveChannelsController(EncoderResolver encoders, LiveChannelsTvService tv, StressTestService stress, InvidiousCatchupManifest catchupManifest)
     {
         _encoders = encoders;
         _tv = tv;
         _stress = stress;
+        _catchupManifest = catchupManifest;
+    }
+
+    /// <summary>Serves an opaque short-lived DASH control manifest to Jellyfin's local FFmpeg process.</summary>
+    /// <param name="token">The unguessable publication token.</param>
+    /// <returns>The MPD control file, or 404 after it expires or disappears.</returns>
+    [AllowAnonymous]
+    [HttpGet("catchup-manifest/{token}.mpd")]
+    [Produces("application/dash+xml")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public ActionResult CatchupManifest(string token)
+    {
+        var path = _catchupManifest.ResolvePublishedPath(token);
+        return path is null ? NotFound() : PhysicalFile(path, "application/dash+xml", enableRangeProcessing: false);
     }
 
     /// <summary>

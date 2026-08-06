@@ -197,13 +197,17 @@ public sealed class CatchupChannel : IChannel, IDisableMediaSourceDisplay, IRequ
             Id = ItemId(channelId, slot.Start, program.ItemId).ToString("N", CultureInfo.InvariantCulture),
             Name = program.Title,
             Path = path,
-            Protocol = MediaProtocol.File,
+            Protocol = Uri.TryCreate(path, UriKind.Absolute, out var uri) && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps)
+                ? MediaProtocol.Http
+                : MediaProtocol.File,
             RunTimeTicks = program.DurationTicks,
             IsInfiniteStream = false,
             SupportsDirectPlay = true,
             SupportsDirectStream = true,
             SupportsProbing = true,
-            Container = Path.GetExtension(path).TrimStart('.')
+            Container = Uri.TryCreate(path, UriKind.Absolute, out var containerUri)
+                ? Path.GetExtension(containerUri.AbsolutePath).TrimStart('.')
+                : Path.GetExtension(path).TrimStart('.')
         };
     }
 
