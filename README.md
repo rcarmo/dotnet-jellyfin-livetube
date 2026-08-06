@@ -1,75 +1,95 @@
-# ![Live Channels](Jellyfin.Plugin.LiveChannels/Assets/Logo.png)
+# Live Channels — rcarmo fork
 
-> This Gitea fork adds backward-compatible compound tag filtering to JPKribs' Live Channels plugin. Library and collection sources can include or exclude tags, choose any/all matching, and episodes inherit their series' tags. Existing configurations without tag fields retain their original behaviour.
+This Jellyfin 10.11.x plugin provides looping virtual TV channels, native Live TV delivery, an Android-compatible catch-up catalogue, and authenticated Invidious subscription channels. It runs inside Jellyfin; no external tuner service or client modification is required.
 
-**Looping virtual TV channels built from your own library and served natively in Jellyfin's Live TV. No separate app, no tuner setup, no URLs to paste.**
+This repository is a maintained fork of [JPKribs/jellyfin-plugin-livechannels](https://github.com/JPKribs/jellyfin-plugin-livechannels). The upstream README is preserved as [README.upstream.md](README.upstream.md).
 
-## Why Does This Exist
+## Fork features
 
-Most pseudo-TV programs run as a separate application that you then wire into Jellyfin as a tuner. Live Channels lives inside the server instead: define a channel, and it appears in Live TV with a full guide, ready to watch.
+- Compound library filters: include or exclude genres and tags, match any or all values, and inherit series tags on episodes.
+- Dynamic multi-source channels with rating, year, studio, person, language and content-type filters.
+- Authenticated Invidious subscription feeds as scheduled Live TV channels.
+- Original-audio Invidious playback with the best H.264 representation up to 1080p.
+- Guide thumbnails cached locally; signed video and audio representations are resolved at playback time.
+- Finite **Live Channels Catch-up VOD** items for the stock Jellyfin Android TV client.
+- No duplicate media in catch-up: local programmes use their library files; Invidious media is range-proxied on demand. Only a short-lived control MPD is stored.
+- QSV/VA-API and other Jellyfin-configured encoders, fixed-format channel output, HDR tone mapping, subtitle burn-in, DVR recording and session controls.
 
-**While all are welcome to use this plugin, my primary goal for this plugin is to test and develop on top of Jellyfin's Live TV. For this reason, this plugin is offered as is, with no guarantee of support, bug fixes, or troubleshooting.**
+## Architecture
 
-## How It Works
-
-You define **channels** in the plugin configuration. Each channel resolves to an ordered list of items that loops forever on a fixed schedule. The plugin registers directly with Jellyfin's **Live TV**, so the channels, their guide, and their streams are all served by Jellyfin itself. Saving a channel refreshes the guide, so edits show up right away.
-
-* **Content from your library.** A channel pulls from libraries, collections, genres, or hand-picked items, then narrows by ratings, years, studios, people, audio language, and content type. Time of day rating blocks change what may air by the clock, so daytime stays family friendly on its own.
-* **A built-in Popular channel.** Channel 0 programs itself from the server's recently played, recently added, and highest rated movies and shows, measured across every user, and stays fresh with rotating picks.
-* **A full guide.** Every program carries its description, genres, ratings, air dates, and episode numbers, plus every artwork shape the content has, with recently added items flagged as new.
-* **Native streaming.** Channels are encoded on demand with Jellyfin's own hardware acceleration (fully GPU-resident on Intel), HDR is tone-mapped to SDR, pacing is automatic, and an encoder that dies mid-watch is replaced in place. Optional subtitle burn-in bakes a track into the picture, styled once for every channel.
-* **Recording.** A program or a whole series can be recorded from the guide. Recordings are materialized from the library files into Jellyfin's Live TV recording folders, just like the built-in DVR.
-* **Sessions dashboard.** Every active encoder is listed with its live speed and full ffmpeg log, and caps, time limits, and idle cleanup keep CPU and disk bounded on their own.
-* **Import and export.** Every channel (filters, appearance, loop behaviour, and logos) moves between servers as one JSON file.
-
-## Settings
-
-Every option on the **Channels**, **Popular**, **Sessions**, and **Settings** tabs is documented in **[SETTINGS.md](SETTINGS.md)**, with defaults and valid ranges.
-
-## Versioning
-
-Releases use a four part version, `JJ.JJ.F.B`, that matches the supported Jellyfin version with the plugin's own feature and bug count:
-
-```
-10.11.1.0
-JJ JJ F B
+```text
+Jellyfin library ─┐
+                  ├─ ChannelService ─ schedule/guide ─ ILiveTvService ─ Android TV Live TV
+Invidious feed ───┘                         │
+                                           └─ IChannel catch-up catalogue
+                                                ├─ local file (finite VOD)
+                                                └─ short-lived MPD
+                                                     └─ range proxy ─ Invidious media
 ```
 
-* `JJ.JJ` is the Jellyfin version this build was tested and released for.
-* `F` is the plugin feature release.
-* `B` is the plugin bug or patch release within that feature.
+Live TV remains a forward-only linear stream. `DirectLiveStream` serves a rolling MPEG-TS window through Jellyfin's own live-stream endpoint. Android TV correctly disables seeking for this infinite Live TV source.
 
-Targets **Jellyfin 10.11.x** (`net9.0`, ABI `10.11.10.0`). Requires ffmpeg, which Jellyfin already bundles and configures.
+Catch-up is a separate `IChannel` provider. It projects the last 24 hours of schedule slots as finite ordinary video items, which enables the stock Android TV client's pause, seek, rewind, fast-forward and resume controls.
 
-## Installation
+For Invidious catch-up, the plugin:
 
-### Step 1: Add Plugin Repository
+1. fetches a fresh DASH manifest;
+2. selects one H.264 representation up to 1080p and the non-enhanced `Role=main` original audio;
+3. rewrites the MPD to opaque local URLs;
+4. range-proxies media bytes without writing them to disk;
+5. removes control MPDs older than one hour.
 
-* Open Jellyfin and navigate to Dashboard → Plugins → Repositories
-* Click Add Repository
-* Enter the following repository URL: `https://raw.githubusercontent.com/JPKribs/jellyfin-plugin-livechannels/master/manifest.json`
-* Click Save
+The proxy tokens exist only in plugin memory and change on restart. Signed upstream URLs are never placed in the Jellyfin catalogue.
 
-### Step 2: Install Plugin
+## Configuration
 
-* Go to the Catalog tab in the Plugins section
-* Find Live Channels in the catalog
-* Click Install
-* Wait for installation to complete
+Open **Dashboard → Plugins → Live Channels**. The plugin has four tabs:
 
-### Step 3: Restart Jellyfin
+- **Channels** — channel identity, sources, filters, logos, ordering and import/export;
+- **Popular** — built-in popularity channel;
+- **Sessions** — active encoders and FFmpeg logs;
+- **Settings** — output format, hardware acceleration, buffering, subtitles and limits.
 
-* Restart your Jellyfin server completely
-* Wait for Jellyfin to fully start up
+[SETTINGS.md](SETTINGS.md) documents every option and valid range.
 
-### Verification Check
+An Invidious source requires:
 
-* After restart, navigate to Dashboard → Plugins → Live Channels, create a channel, run **Refresh Guide**, then open **Live TV** to confirm the channel appears.
+- an absolute instance URL;
+- a read-only bearer token with `GET:feed` access;
+- a maximum feed result count between 1 and 200.
 
----
+Keep the token outside Git and plugin XML. Supply it to Jellyfin through a protected service environment variable or equivalent secret store.
 
-## AI Disclaimer
+## Build and test
 
-Claude Code was utilized in the initial structure of this project and first drafts of documentation. All code has been manually reviewed, tested, and revised after its generation. This disclaimer exists in the interest of transparency.
+Requirements: .NET 9 SDK and Jellyfin 10.11.x.
 
-**All code was written, or code reviewed and tested, by humans.**
+```bash
+dotnet restore Jellyfin.Plugin.LiveChannels.sln
+dotnet test Jellyfin.Plugin.LiveChannels.sln --configuration Release
+```
+
+The release assembly is:
+
+```text
+Jellyfin.Plugin.LiveChannels/bin/Release/net9.0/Jellyfin.Plugin.LiveChannels.dll
+```
+
+Install it in the plugin directory and restart Jellyfin. Preserve the previous DLL for rollback.
+
+## Verification
+
+After deployment:
+
+1. Confirm the plugin is active.
+2. Run Jellyfin's **Refresh Guide** scheduled task.
+3. Open Live TV and play a local and an Invidious channel.
+4. Open **Live Channels Catch-up VOD** from My Media.
+5. Verify a local item and an Invidious item seek in the stock Android TV client.
+6. Confirm the catch-up cache contains MPD control files but no MP4, M4A or WebM copies.
+
+The current fork targets Jellyfin 10.11.x (`net9.0`, ABI package 10.11.10). See [CATCHUP.md](CATCHUP.md) for the catch-up contract and limits.
+
+## Licence and upstream notice
+
+The project retains the upstream GPL-3.0 licence in [LICENSE](LICENSE). The upstream support and AI-generation notices remain in [README.upstream.md](README.upstream.md).

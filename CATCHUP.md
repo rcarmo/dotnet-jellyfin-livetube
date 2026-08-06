@@ -1,72 +1,61 @@
-# Catch-up and restart playback design
+# Catch-up and restart playback
 
-Jellyfin Android TV disables seeking for every Live TV session. The plugin therefore cannot add rewind to its existing `ILiveTvService` stream. Catch-up playback must use Jellyfin's ordinary video path.
+The plugin exposes recent schedule slots as finite Jellyfin video items. Stock Jellyfin Android TV can seek these items without client changes.
 
-## Proposed user model
+## User model
 
-Register a second Jellyfin provider named **Live Channels Catch-up** through `MediaBrowser.Controller.Channels.IChannel`.
+The `IChannel` provider is named **Live Channels Catch-up VOD**. It exposes:
 
-The provider exposes:
+- one folder per enabled virtual channel;
+- the current programme and completed schedule slots from the last 24 hours;
+- stable item IDs derived from channel ID, slot start and source item ID;
+- guide metadata and cached artwork from `ProgramEntry`;
+- finite `MediaSourceInfo` records resolved at playback time through `IRequiresMediaInfoCallback`.
 
-- one folder per configured virtual channel;
-- the current programme and a bounded set of past schedule slots in each folder;
-- ordinary video items with stable IDs derived from the channel ID, slot start and source item ID;
-- the guide title, episode metadata and cached artwork already stored in `ProgramEntry`.
+Catch-up progress belongs to its projected channel item. Live TV remains an infinite, forward-only stream and does not gain rewind controls.
 
-Opening a catch-up item uses normal video playback. Android TV then permits pause, seek, rewind, fast-forward and resume because the item is not marked `IsLiveStream`.
+## Local programmes
 
-## Local library programmes
+Local items use the original indexed file. The callback supplies the real path and finite runtime. Jellyfin enforces the requesting user's normal library visibility before the item appears.
 
-A local schedule slot already stores the Jellyfin item ID, source path and runtime.
-
-The catch-up item can expose the source file as a finite `MediaSourceInfo` with `RunTimeTicks` set. The first version should expose the whole programme. Selecting **Resume live position** can start the item at:
-
-```text
-UTC now - programme slot start
-```
-
-Selecting **Restart programme** starts at zero. Playback progress belongs to the catch-up item and does not alter the source library item's watched state unless this is made an explicit option.
-
-No media copy is required. Existing access controls must still be applied to the channel item.
+No duplicate file is created.
 
 ## Invidious programmes
 
-An Invidious schedule slot stores the stable video ID, runtime, instance URL and cached thumbnail.
+Signed Invidious URLs expire and cannot be persisted in Jellyfin's channel catalogue. On each playback request the plugin:
 
-The provider cannot persist signed representation URLs because they expire. On first catch-up request it must:
+1. fetches a fresh Invidious DASH manifest;
+2. identifies the non-enhanced `Role=main` original audio adaptation set;
+3. selects the highest H.264 video representation at or below 1080p;
+4. removes all other audio and video representations;
+5. writes a short-lived MPD whose `BaseURL` entries use opaque plugin URLs;
+6. publishes the MPD over Jellyfin's local HTTP endpoint;
+7. range-proxies each selected remote representation to FFmpeg.
 
-1. Resolve the current H.264 representation and the non-enhanced `Role=main` original audio representation.
-2. Download or remux them into a finite local media file under a bounded cache.
-3. Write atomically and verify the output duration and streams before publishing it.
-4. Return the cached file as an ordinary finite media source.
+The range proxy streams response bodies directly. It does not save video or audio payloads. FFmpeg receives exactly two streams—video index 0 and original audio index 1—and Jellyfin packages them for the requesting client's normal VOD path.
 
-The cache key must include the video ID and selected output profile. Concurrent requests for one video must share one materialisation task. Failed partial files must not be published.
+## Retention and bounds
 
-A later implementation can replace full materialisation with a seekable local proxy, but a finite file is compatible with stock Jellyfin clients and does not depend on expiring signed URLs during playback.
+- Schedule history: 24 hours.
+- MPD freshness before regeneration: four minutes.
+- MPD cleanup age: one hour.
+- Maximum MPD size: 2 MiB.
+- Media payload cache: none.
+- Concurrent requests for one video ID share one manifest-generation gate.
+- Publication and media tokens are random 128-bit values held in memory and disappear on restart.
+- Invidious guide artwork uses the separate bounded artwork cache.
 
-## Retention
+## Verified contract
 
-Start with these limits:
+Verified on 6 August 2026 with Jellyfin 10.11.11 and the Android TV 0.19.9 device profile:
 
-- 24 hours of schedule history;
-- 20 GB total Invidious media cache;
-- least-recently-used eviction, excluding active files;
-- no duplicate local-library media;
-- cached thumbnails may outlive media files and are pruned separately.
+- the provider appears in Jellyfin's user views;
+- a local source returns a finite runtime and valid Android-profile HLS output;
+- an Invidious source returns `IsInfiniteStream: false` and finite runtime;
+- the selected streams are H.264 video plus `Role=main` original AAC audio;
+- a generated three-second HLS segment decodes with both video and audio;
+- the catch-up directory contains only the control MPD, with no MP4, M4A or WebM copies.
 
-## Jellyfin API surface
+## Live TV limitation
 
-`IChannel` is suitable because `ChannelItemInfo` supports folders, finite video items, runtime, artwork and `MediaSourceInfo` entries. Jellyfin stores these items in its channel catalogue and plays non-live entries through the normal VOD pipeline.
-
-The prototype must confirm these points against Jellyfin 10.11.10 and Android TV 0.19.9:
-
-1. The **Live Channels Catch-up** provider is visible in the stock Android TV client.
-2. A local item appears as a finite video and seeks correctly.
-3. Resume position is stored per catch-up item.
-4. A materialised Invidious item plays with original audio and seeks correctly.
-5. Parent and user access restrictions are enforced.
-6. Cache eviction cannot remove a file in active playback.
-
-## Excluded approach
-
-Making `SegmentConcatStream` seekable does not enable rewind. Jellyfin wraps `IDirectStreamProvider.GetStream()` in a `ProgressiveFileStream` whose `CanSeek` is false, normalises plugin Live TV sources to infinite streams, and Android TV returns false from `canSeek()` whenever `isLiveTv` is true.
+Making `SegmentConcatStream` seekable would not enable Android TV rewind. Jellyfin presents plugin Live TV sources as infinite and wraps direct providers in a non-seekable progressive stream. Catch-up therefore uses the ordinary finite-video contract; Live TV retains channel surfing and wall-clock schedule semantics.
