@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Xml.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using MediaBrowser.Common.Configuration;
@@ -18,6 +19,7 @@ public sealed class InvidiousCatchupManifest
 {
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> Gates = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, string> _published = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, string> _publishedMedia = new(StringComparer.Ordinal);
     private static readonly TimeSpan MaximumAge = TimeSpan.FromMinutes(4);
     private static readonly TimeSpan CleanupAge = TimeSpan.FromHours(1);
     private readonly InvidiousFeedClient _invidious;
@@ -59,6 +61,7 @@ public sealed class InvidiousCatchupManifest
             try
             {
                 await _invidious.WriteOriginalAudioDashManifestAsync(instanceUrl, videoId, temporary, cancellationToken).ConfigureAwait(false);
+                RewriteMediaUrls(temporary);
                 if (new FileInfo(temporary).Length is <= 0 or > 2 * 1024 * 1024)
                 {
                     throw new InvalidDataException("The Invidious DASH control manifest has an invalid size.");
@@ -90,6 +93,17 @@ public sealed class InvidiousCatchupManifest
         return _published.TryGetValue(token, out var path) ? path : null;
     }
 
+    /// <summary>Resolves an opaque media proxy token to the signed representation URL selected from Invidious.</summary>
+    public string? ResolvePublishedMediaUrl(string token)
+    {
+        if (string.IsNullOrWhiteSpace(token) || token.Length != 32 || token.Any(character => !char.IsAsciiHexDigit(character)))
+        {
+            return null;
+        }
+
+        return _publishedMedia.TryGetValue(token, out var url) ? url : null;
+    }
+
     internal static void Cleanup(string root, TimeSpan maximumAge, string protectedPath)
     {
         if (!Directory.Exists(root))
@@ -105,6 +119,26 @@ public sealed class InvidiousCatchupManifest
                 TryDelete(file.FullName);
             }
         }
+    }
+
+    private void RewriteMediaUrls(string path)
+    {
+        var document = XDocument.Load(path, LoadOptions.PreserveWhitespace);
+        var ns = document.Root?.Name.Namespace ?? XNamespace.None;
+        foreach (var baseUrl in document.Descendants(ns + "BaseURL"))
+        {
+            var remote = baseUrl.Value.Trim();
+            if (!Uri.TryCreate(remote, UriKind.Absolute, out var uri) || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+            {
+                throw new InvalidDataException("The catch-up DASH manifest contains an invalid media URL.");
+            }
+
+            var token = Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture);
+            _publishedMedia[token] = remote;
+            baseUrl.Value = _applicationHost.GetApiUrlForLocalAccess() + "/livechannels/catchup-media/" + token;
+        }
+
+        document.Save(path, SaveOptions.DisableFormatting);
     }
 
     private InvidiousCatchupManifestResult Publish(string path, InvidiousPlaybackMedia media)

@@ -20,6 +20,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
     /// <inheritdoc />
     public void RegisterServices(IServiceCollection serviceCollection, IServerApplicationHost applicationHost)
     {
+        serviceCollection.AddHttpClient();
         serviceCollection.AddSingleton(_ => new InvidiousFeedClient(new HttpClient()));
         serviceCollection.AddSingleton(sp => new InvidiousArtworkCache(
             new HttpClient(),

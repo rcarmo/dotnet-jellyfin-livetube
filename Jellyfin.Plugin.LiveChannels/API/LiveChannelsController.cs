@@ -1,5 +1,7 @@
 using System;
 using System.IO;
+using System.Net.Http;
+using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.LiveChannels.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -23,6 +25,7 @@ public class LiveChannelsController : ControllerBase
     private readonly LiveChannelsTvService _tv;
     private readonly StressTestService _stress;
     private readonly InvidiousCatchupManifest _catchupManifest;
+    private readonly IHttpClientFactory _httpClientFactory;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="LiveChannelsController"/> class.
@@ -31,12 +34,14 @@ public class LiveChannelsController : ControllerBase
     /// <param name="tv">The Live TV service, which owns the active channel streams.</param>
     /// <param name="stress">The encoder stress test the settings page can run.</param>
     /// <param name="catchupManifest">The short-lived remote catch-up manifest publisher.</param>
-    public LiveChannelsController(EncoderResolver encoders, LiveChannelsTvService tv, StressTestService stress, InvidiousCatchupManifest catchupManifest)
+    /// <param name="httpClientFactory">Creates clients for the range-preserving remote media proxy.</param>
+    public LiveChannelsController(EncoderResolver encoders, LiveChannelsTvService tv, StressTestService stress, InvidiousCatchupManifest catchupManifest, IHttpClientFactory httpClientFactory)
     {
         _encoders = encoders;
         _tv = tv;
         _stress = stress;
         _catchupManifest = catchupManifest;
+        _httpClientFactory = httpClientFactory;
     }
 
     /// <summary>Serves an opaque short-lived DASH control manifest to Jellyfin's local FFmpeg process.</summary>
@@ -51,6 +56,52 @@ public class LiveChannelsController : ControllerBase
     {
         var path = _catchupManifest.ResolvePublishedPath(token);
         return path is null ? NotFound() : PhysicalFile(path, "application/dash+xml", enableRangeProcessing: false);
+    }
+
+    /// <summary>Range-proxies a selected remote representation without persisting its payload.</summary>
+    /// <param name="token">The unguessable media publication token.</param>
+    /// <param name="cancellationToken">Aborts the upstream request when FFmpeg disconnects.</param>
+    /// <returns>The requested media byte range.</returns>
+    [AllowAnonymous]
+    [HttpGet("catchup-media/{token}")]
+    public async Task<IActionResult> CatchupMedia(string token, CancellationToken cancellationToken)
+    {
+        var url = _catchupManifest.ResolvePublishedMediaUrl(token);
+        if (url is null)
+        {
+            return NotFound();
+        }
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        if (Request.Headers.TryGetValue("Range", out var range))
+        {
+            request.Headers.TryAddWithoutValidation("Range", range.ToString());
+        }
+
+        using var response = await _httpClientFactory.CreateClient().SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            return StatusCode((int)response.StatusCode);
+        }
+
+        Response.StatusCode = (int)response.StatusCode;
+        if (response.Content.Headers.ContentType is not null)
+        {
+            Response.ContentType = response.Content.Headers.ContentType.ToString();
+        }
+
+        if (response.Content.Headers.ContentLength is long length)
+        {
+            Response.ContentLength = length;
+        }
+
+        if (response.Content.Headers.ContentRange is not null)
+        {
+            Response.Headers.ContentRange = response.Content.Headers.ContentRange.ToString();
+        }
+
+        await response.Content.CopyToAsync(Response.Body, cancellationToken).ConfigureAwait(false);
+        return new EmptyResult();
     }
 
     /// <summary>
