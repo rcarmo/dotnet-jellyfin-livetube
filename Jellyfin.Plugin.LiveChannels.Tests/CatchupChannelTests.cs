@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using Jellyfin.Plugin.LiveChannels.Models;
 using Jellyfin.Plugin.LiveChannels.Services;
@@ -21,6 +22,11 @@ public sealed class CatchupChannelTests
         var program = new ProgramEntry(Guid.Parse("11111111-2222-3333-4444-555555555555"), "Example", "Overview", TimeSpan.FromMinutes(42).Ticks, "/media/example.mkv")
         {
             SeriesName = "Series",
+            RawName = "Episode title",
+            HomePageUrl = "https://example.test/episode",
+            ProviderIds = new Dictionary<string, string> { ["Tvdb"] = "12345" },
+            Studios = new[] { "Example Network" },
+            Tags = new[] { "Drama", "Mystery" },
             SeasonNumber = 2,
             EpisodeNumber = 3,
             ThumbImagePath = "/art/thumb.jpg"
@@ -33,6 +39,11 @@ public sealed class CatchupChannelTests
         Assert.Equal(ChannelMediaType.Video, item.MediaType);
         Assert.False(item.IsLiveStream);
         Assert.Equal(program.DurationTicks, item.RunTimeTicks);
+        Assert.Equal("Episode title", item.OriginalTitle);
+        Assert.Equal("https://example.test/episode", item.HomePageUrl);
+        Assert.Equal("12345", item.ProviderIds["Tvdb"]);
+        Assert.Equal(new[] { "Example Network" }, item.Studios);
+        Assert.Equal(new[] { "Drama", "Mystery" }, item.Tags);
         Assert.Equal("/art/thumb.jpg", item.ImageUrl);
         var placeholder = Assert.Single(item.MediaSources);
         Assert.Equal(item.Id, placeholder.Id);

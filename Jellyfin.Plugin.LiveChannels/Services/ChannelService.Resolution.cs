@@ -283,6 +283,21 @@ public partial class ChannelService
                     InvidiousUrl = source.InvidiousUrl,
                     RawName = video.Title,
                     SeriesName = video.Author,
+                    HomePageUrl = "https://www.youtube.com/watch?v=" + Uri.EscapeDataString(video.VideoId),
+                    ProviderIds = string.IsNullOrWhiteSpace(video.AuthorId)
+                        ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["YouTube"] = video.VideoId }
+                        : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                        {
+                            ["YouTube"] = video.VideoId,
+                            // ChannelItemInfo has no SeriesProviderIds field, so carry publisher identity in the
+                            // item dictionary too; Live TV still receives it through SeriesProviderIds below.
+                            ["YouTubeChannel"] = video.AuthorId
+                        },
+                    SeriesProviderIds = string.IsNullOrWhiteSpace(video.AuthorId)
+                        ? new Dictionary<string, string>()
+                        : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["YouTubeChannel"] = video.AuthorId },
+                    Studios = string.IsNullOrWhiteSpace(video.Author) ? Array.Empty<string>() : new[] { video.Author },
+                    Tags = InvidiousGenres,
                     DateAdded = video.PublishedUtc ?? DateTime.UnixEpoch,
                     PremiereDate = video.PublishedUtc,
                     // Android TV's Live TV "On Now" row renders only the programme Primary image. A YouTube
@@ -664,6 +679,13 @@ public partial class ChannelService
             SeriesId = seriesId,
             SeriesName = seriesName,
             RawName = rawName,
+            HomePageUrl = item.HomePageUrl,
+            ProviderIds = new Dictionary<string, string>(item.ProviderIds, StringComparer.OrdinalIgnoreCase),
+            SeriesProviderIds = asEpisode is null || seriesId is null
+                ? new Dictionary<string, string>()
+                : new Dictionary<string, string>(_libraryManager.GetItemById(seriesId.Value)?.ProviderIds ?? new Dictionary<string, string>(), StringComparer.OrdinalIgnoreCase),
+            Studios = item.Studios ?? Array.Empty<string>(),
+            Tags = item.Tags ?? Array.Empty<string>(),
             PrimaryImagePath = images.Primary,
             ThumbImagePath = images.Thumb,
             BackdropImagePath = images.Backdrop,

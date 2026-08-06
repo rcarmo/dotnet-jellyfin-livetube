@@ -52,7 +52,7 @@ public sealed class CatchupChannel : IChannel, IDisableMediaSourceDisplay, IRequ
     public string Description => "Restart and seek recent programmes from the virtual Live TV schedule.";
 
     /// <inheritdoc />
-    public string DataVersion => "4";
+    public string DataVersion => "5";
 
     /// <inheritdoc />
     public string HomePageUrl => string.Empty;
@@ -76,7 +76,7 @@ public sealed class CatchupChannel : IChannel, IDisableMediaSourceDisplay, IRequ
     public bool IsEnabledFor(string userId) => true;
 
     /// <inheritdoc />
-    public string GetCacheKey(string? userId) => "v4|" + _channels.InvidiousFeedGenerationKey();
+    public string GetCacheKey(string? userId) => "v5|metadata|" + _channels.InvidiousFeedGenerationKey();
 
     /// <inheritdoc />
     public Task<ChannelItemResult> GetChannelItems(InternalChannelItemQuery query, CancellationToken cancellationToken)
@@ -166,8 +166,13 @@ public sealed class CatchupChannel : IChannel, IDisableMediaSourceDisplay, IRequ
         {
             Id = ItemId(channelId, slot.Start, program.ItemId).ToString("N", CultureInfo.InvariantCulture),
             Name = program.Title,
+            OriginalTitle = program.RawName,
             SeriesName = program.SeriesName,
             Overview = program.Overview,
+            HomePageUrl = program.HomePageUrl,
+            ProviderIds = new Dictionary<string, string>(program.ProviderIds, StringComparer.OrdinalIgnoreCase),
+            Studios = program.Studios.ToList(),
+            Tags = program.Tags.ToList(),
             Type = ChannelItemType.Media,
             MediaType = ChannelMediaType.Video,
             ContentType = program.IsMovie ? ChannelMediaContentType.Movie : ChannelMediaContentType.Episode,
@@ -190,7 +195,17 @@ public sealed class CatchupChannel : IChannel, IDisableMediaSourceDisplay, IRequ
             // Jellyfin answers NoCompatibleStream. Persist our own placeholder with the dynamic source id instead.
             // MediaSourceManager removes placeholders before playback and retains the real callback source.
             MediaSources = new List<MediaSourceInfo> { BuildListingPlaceholder(channelId, slot) },
-            Etag = Hash(string.Join('|', "v5", sourceKey, program.DurationTicks.ToString(CultureInfo.InvariantCulture), slot.Start.Ticks.ToString(CultureInfo.InvariantCulture)))
+            Etag = Hash(string.Join(
+                '|',
+                "v6-metadata",
+                sourceKey,
+                program.DurationTicks.ToString(CultureInfo.InvariantCulture),
+                slot.Start.Ticks.ToString(CultureInfo.InvariantCulture),
+                program.RawName,
+                program.HomePageUrl,
+                string.Join(';', program.ProviderIds.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase).Select(pair => pair.Key + '=' + pair.Value)),
+                string.Join(';', program.Studios),
+                string.Join(';', program.Tags)))
         };
     }
 
@@ -307,7 +322,11 @@ public sealed class CatchupChannel : IChannel, IDisableMediaSourceDisplay, IRequ
     internal static Guid FolderId(string channelId) => StableId("catchup-folder:" + channelId);
 
     internal static Guid ItemId(string channelId, DateTime start, Guid itemId)
-        => StableId(string.Create(CultureInfo.InvariantCulture, $"catchup-item-v3:{channelId}:{start.Ticks}:{itemId:N}"));
+        // v5 rematerializes the catalogue after the metadata contract gained provider ids, original title,
+        // studios, tags and canonical URLs. Jellyfin preserves metadata on an existing channel-item id even when
+        // its provider ETag changes, so an identity revision is required once; normal dead-item reconciliation
+        // removes the v3 rows without touching source media.
+        => StableId(string.Create(CultureInfo.InvariantCulture, $"catchup-item-v5-metadata:{channelId}:{start.Ticks}:{itemId:N}"));
 
     private static ChannelItemResult Result(IEnumerable<ChannelItemInfo> items)
     {

@@ -72,8 +72,23 @@ public sealed class ProgramEntry
     /// <summary>Gets the series name for episodes, used to order and label blocks.</summary>
     public string? SeriesName { get; init; }
 
-    /// <summary>Gets the item's own name (the episode title, without the series prefix), used to detect multi-part siblings.</summary>
+    /// <summary>Gets the item's own name (the episode/video title, without the series or publisher prefix), used for original-title metadata and multi-part detection.</summary>
     public string? RawName { get; init; }
+
+    /// <summary>Gets the canonical public page for the source item, or <c>null</c>.</summary>
+    public string? HomePageUrl { get; init; }
+
+    /// <summary>Gets stable external provider identifiers for the item.</summary>
+    public IReadOnlyDictionary<string, string> ProviderIds { get; init; } = new Dictionary<string, string>();
+
+    /// <summary>Gets stable external provider identifiers for the parent series or publishing channel.</summary>
+    public IReadOnlyDictionary<string, string> SeriesProviderIds { get; init; } = new Dictionary<string, string>();
+
+    /// <summary>Gets studios, networks, or the remote publishing channel attributed to the item.</summary>
+    public IReadOnlyList<string> Studios { get; init; } = Array.Empty<string>();
+
+    /// <summary>Gets source tags preserved for Catch-up discovery.</summary>
+    public IReadOnlyList<string> Tags { get; init; } = Array.Empty<string>();
 
     /// <summary>Gets the file-system path to the program's portrait artwork (the poster), or <c>null</c>. For an episode this is the series poster, since an episode's own primary image is a landscape still.</summary>
     public string? PrimaryImagePath { get; init; }

@@ -29,6 +29,11 @@ public class ScheduleCacheSerializationTests
             SeriesId = Guid.NewGuid(),
             SeriesName = "American Dad!",
             RawName = "Pilot",
+            HomePageUrl = "https://example.test/american-dad/pilot",
+            ProviderIds = new Dictionary<string, string> { ["Tmdb"] = "1433", ["Tvdb"] = "73141" },
+            SeriesProviderIds = new Dictionary<string, string> { ["Tvdb"] = "73141" },
+            Studios = new[] { "20th Television" },
+            Tags = new[] { "Animation", "Satire" },
             PrimaryImagePath = "/cache/img/ad-poster.jpg",
             ThumbImagePath = "/cache/img/ad-thumb.jpg",
             BackdropImagePath = "/cache/img/ad-backdrop.jpg",
@@ -66,6 +71,11 @@ public class ScheduleCacheSerializationTests
         Assert.Equal(original.SeriesId, entry.SeriesId);
         Assert.Equal(original.SeriesName, entry.SeriesName);
         Assert.Equal(original.RawName, entry.RawName);
+        Assert.Equal(original.HomePageUrl, entry.HomePageUrl);
+        Assert.Equal(original.ProviderIds, entry.ProviderIds);
+        Assert.Equal(original.SeriesProviderIds, entry.SeriesProviderIds);
+        Assert.Equal(original.Studios, entry.Studios);
+        Assert.Equal(original.Tags, entry.Tags);
         Assert.Equal(original.PrimaryImagePath, entry.PrimaryImagePath);
         Assert.Equal(original.ThumbImagePath, entry.ThumbImagePath);
         Assert.Equal(original.BackdropImagePath, entry.BackdropImagePath);
