@@ -49,7 +49,7 @@ public sealed class CatchupChannel : IChannel, IDisableMediaSourceDisplay
     public string Description => "Restart and seek recent programmes from the virtual Live TV schedule.";
 
     /// <inheritdoc />
-    public string DataVersion => "1";
+    public string DataVersion => "2";
 
     /// <inheritdoc />
     public string HomePageUrl => string.Empty;
@@ -170,7 +170,7 @@ public sealed class CatchupChannel : IChannel, IDisableMediaSourceDisplay
             Genres = program.Genres.ToList(),
             ImageUrl = program.ThumbImagePath ?? program.PrimaryImagePath,
             MediaSources = new List<MediaSourceInfo> { source },
-            Etag = Hash(string.Join('|', path, program.DurationTicks.ToString(CultureInfo.InvariantCulture), slot.Start.Ticks.ToString(CultureInfo.InvariantCulture)))
+            Etag = Hash(string.Join('|', "v2", path, program.DurationTicks.ToString(CultureInfo.InvariantCulture), slot.Start.Ticks.ToString(CultureInfo.InvariantCulture)))
         };
     }
 
