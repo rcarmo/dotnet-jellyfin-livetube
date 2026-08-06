@@ -33,7 +33,8 @@ public sealed class CatchupChannelTests
         Assert.False(item.IsLiveStream);
         Assert.Equal(program.DurationTicks, item.RunTimeTicks);
         Assert.Equal("/art/thumb.jpg", item.ImageUrl);
-        var source = Assert.Single(item.MediaSources);
+        Assert.Empty(item.MediaSources);
+        var source = CatchupChannel.BuildLocalMediaSource("channel-1", slot);
         Assert.Equal("/media/example.mkv", source.Path);
         Assert.Equal(MediaProtocol.File, source.Protocol);
         Assert.False(source.IsInfiniteStream);

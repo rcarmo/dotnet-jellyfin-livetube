@@ -24,7 +24,7 @@ namespace Jellyfin.Plugin.LiveChannels.Services;
 /// Exposes recent virtual-channel programmes as finite video items. Jellyfin clients play these through the normal
 /// VOD path, so pause, seek, rewind, fast-forward and resume work without changing the Live TV client.
 /// </summary>
-public sealed class CatchupChannel : IChannel, IDisableMediaSourceDisplay
+public sealed class CatchupChannel : IChannel, IDisableMediaSourceDisplay, IRequiresMediaInfoCallback
 {
     private static readonly TimeSpan History = TimeSpan.FromHours(24);
     private readonly ChannelService _channels;
@@ -122,6 +122,25 @@ public sealed class CatchupChannel : IChannel, IDisableMediaSourceDisplay
     }
 
     /// <inheritdoc />
+    public Task<IEnumerable<MediaSourceInfo>> GetChannelItemMediaInfo(string id, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var now = DateTime.UtcNow;
+        foreach (var channel in _channels.GetEnabledChannels())
+        {
+            var programmes = _channels.ResolvePrograms(channel);
+            var slot = _channels.BuildTimeline(channel, programmes, now - History, now.AddSeconds(1))
+                .FirstOrDefault(candidate => string.Equals(ItemId(channel.Id, candidate.Start, candidate.Program.ItemId).ToString("N", CultureInfo.InvariantCulture), id, StringComparison.OrdinalIgnoreCase));
+            if (slot is not null && !slot.Program.IsInvidious && !string.IsNullOrEmpty(slot.Program.Path) && File.Exists(slot.Program.Path))
+            {
+                return Task.FromResult<IEnumerable<MediaSourceInfo>>(new[] { BuildLocalMediaSource(channel.Id, slot) });
+            }
+        }
+
+        return Task.FromResult<IEnumerable<MediaSourceInfo>>(Array.Empty<MediaSourceInfo>());
+    }
+
+    /// <inheritdoc />
     public Task<DynamicImageResponse> GetChannelImage(ImageType type, CancellationToken cancellationToken)
         => Task.FromResult(new DynamicImageResponse { HasImage = false });
 
@@ -132,21 +151,6 @@ public sealed class CatchupChannel : IChannel, IDisableMediaSourceDisplay
     {
         var program = slot.Program;
         var path = program.Path ?? throw new ArgumentException("A local catch-up programme needs a media path.", nameof(slot));
-        var source = new MediaSourceInfo
-        {
-            // Jellyfin's HLS controller parses MediaSourceId as a GUID for channel items.
-            Id = ItemId(channelId, slot.Start, program.ItemId).ToString("N", CultureInfo.InvariantCulture),
-            Name = program.Title,
-            Path = path,
-            Protocol = MediaProtocol.File,
-            RunTimeTicks = program.DurationTicks,
-            IsInfiniteStream = false,
-            SupportsDirectPlay = true,
-            SupportsDirectStream = true,
-            SupportsProbing = true,
-            Container = Path.GetExtension(path).TrimStart('.')
-        };
-
         return new ChannelItemInfo
         {
             Id = ItemId(channelId, slot.Start, program.ItemId).ToString("N", CultureInfo.InvariantCulture),
@@ -169,8 +173,27 @@ public sealed class CatchupChannel : IChannel, IDisableMediaSourceDisplay
             CommunityRating = program.CommunityRating,
             Genres = program.Genres.ToList(),
             ImageUrl = program.ThumbImagePath ?? program.PrimaryImagePath,
-            MediaSources = new List<MediaSourceInfo> { source },
-            Etag = Hash(string.Join('|', "v2", path, program.DurationTicks.ToString(CultureInfo.InvariantCulture), slot.Start.Ticks.ToString(CultureInfo.InvariantCulture)))
+            MediaSources = new List<MediaSourceInfo>(),
+            Etag = Hash(string.Join('|', "v3", path, program.DurationTicks.ToString(CultureInfo.InvariantCulture), slot.Start.Ticks.ToString(CultureInfo.InvariantCulture)))
+        };
+    }
+
+    internal static MediaSourceInfo BuildLocalMediaSource(string channelId, ScheduledProgram slot)
+    {
+        var program = slot.Program;
+        var path = program.Path ?? throw new ArgumentException("A local catch-up programme needs a media path.", nameof(slot));
+        return new MediaSourceInfo
+        {
+            Id = ItemId(channelId, slot.Start, program.ItemId).ToString("N", CultureInfo.InvariantCulture),
+            Name = program.Title,
+            Path = path,
+            Protocol = MediaProtocol.File,
+            RunTimeTicks = program.DurationTicks,
+            IsInfiniteStream = false,
+            SupportsDirectPlay = true,
+            SupportsDirectStream = true,
+            SupportsProbing = true,
+            Container = Path.GetExtension(path).TrimStart('.')
         };
     }
 
