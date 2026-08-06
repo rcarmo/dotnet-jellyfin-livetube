@@ -17,6 +17,15 @@ public readonly record struct ArtworkSet(string? Primary, string? Thumb, string?
 public static class GuideImages
 {
     /// <summary>
+    /// Projects a source's sole landscape image into both programme slots. Jellyfin's Android TV Live TV
+    /// "On Now" row reads Primary while guide and catch-up layouts read Thumb.
+    /// </summary>
+    /// <param name="path">The stable local landscape image path, or <c>null</c>.</param>
+    /// <returns>Artwork with the same image in Primary and Thumb.</returns>
+    public static ArtworkSet LandscapeOnly(string? path)
+        => new(path, path, null, null);
+
+    /// <summary>
     /// Fills the four guide artwork slots from an item's own images and its parent series' images.
     /// </summary>
     /// <param name="own">The item's own artwork.</param>

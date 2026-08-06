@@ -271,6 +271,7 @@ public partial class ChannelService
             foreach (var video in videos.Where(v => !string.IsNullOrWhiteSpace(v.VideoId) && v.LengthSeconds > 0))
             {
                 var thumbnail = _invidiousArtwork.GetThumbnailAsync(source.InvidiousUrl, video, CancellationToken.None).GetAwaiter().GetResult();
+                var artwork = GuideImages.LandscapeOnly(thumbnail);
                 entries.Add(new ProgramEntry(
                     StableInvidiousId(video.VideoId),
                     string.IsNullOrWhiteSpace(video.Author) ? video.Title : video.Author + " - " + video.Title,
@@ -284,7 +285,11 @@ public partial class ChannelService
                     SeriesName = video.Author,
                     DateAdded = video.PublishedUtc ?? DateTime.UnixEpoch,
                     PremiereDate = video.PublishedUtc,
-                    ThumbImagePath = thumbnail,
+                    // Android TV's Live TV "On Now" row renders only the programme Primary image. A YouTube
+                    // thumbnail is already 16:9 and is the sole artwork for this source, so expose the same stable
+                    // cached file in both slots: Primary for On Now and Thumb for guide/catch-up landscape cards.
+                    PrimaryImagePath = artwork.Primary,
+                    ThumbImagePath = artwork.Thumb,
                     Genres = InvidiousGenres
                 });
             }

@@ -12,6 +12,26 @@ public class GuideImageTests
     private static readonly ArtworkSet Nothing = new(null, null, null, null);
 
     [Fact]
+    public void LandscapeOnly_FillsPrimaryForOnNowAndThumbForGuideCards()
+    {
+        var chosen = GuideImages.LandscapeOnly("/cache/invidious/video.jpg");
+
+        Assert.Equal("/cache/invidious/video.jpg", chosen.Primary);
+        Assert.Equal("/cache/invidious/video.jpg", chosen.Thumb);
+        Assert.Null(chosen.Backdrop);
+        Assert.Null(chosen.Logo);
+    }
+
+    [Fact]
+    public void LandscapeOnly_WithNoDownloadedImage_LeavesArtworkEmpty()
+    {
+        var chosen = GuideImages.LandscapeOnly(null);
+
+        Assert.Null(chosen.Primary);
+        Assert.Null(chosen.Thumb);
+    }
+
+    [Fact]
     public void Movie_UsesItsOwnPosterAndThumb()
     {
         var own = new ArtworkSet("/movie/poster.jpg", "/movie/thumb.jpg", "/movie/fanart.jpg", "/movie/logo.png");
