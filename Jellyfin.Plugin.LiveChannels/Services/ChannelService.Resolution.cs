@@ -258,17 +258,15 @@ public partial class ChannelService
 
     private IReadOnlyList<ProgramEntry> ResolveInvidiousFeed(LibrarySource source)
     {
-        var token = Environment.GetEnvironmentVariable("LIVECHANNELS_INVIDIOUS_TOKEN");
-        if (string.IsNullOrWhiteSpace(token) || string.IsNullOrWhiteSpace(source.InvidiousUrl))
+        if (string.IsNullOrWhiteSpace(source.InvidiousUrl))
         {
-            _logger.LogWarning("Live Channels: Invidious source is missing its URL or LIVECHANNELS_INVIDIOUS_TOKEN");
+            _logger.LogWarning("Live Channels: Invidious source is missing its URL");
             return Array.Empty<ProgramEntry>();
         }
 
         try
         {
-            var maximum = source.InvidiousMaximumResults <= 0 ? 50 : Math.Min(source.InvidiousMaximumResults, 200);
-            var videos = _invidious.GetFeedAsync(source.InvidiousUrl, token, maximum, CancellationToken.None).GetAwaiter().GetResult();
+            var videos = _invidiousFeeds.Get(source.InvidiousUrl, DateTime.UtcNow);
             var entries = new List<ProgramEntry>();
             foreach (var video in videos.Where(v => !string.IsNullOrWhiteSpace(v.VideoId) && v.LengthSeconds > 0))
             {

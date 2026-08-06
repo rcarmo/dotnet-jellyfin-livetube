@@ -26,6 +26,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
             new HttpClient(),
             Path.Combine(sp.GetRequiredService<MediaBrowser.Common.Configuration.IApplicationPaths>().CachePath, "livechannels-assets", "invidious"),
             sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<InvidiousArtworkCache>>()));
+        serviceCollection.AddSingleton<InvidiousFeedStore>();
         serviceCollection.AddSingleton<ChannelService>();
         serviceCollection.AddSingleton<InvidiousCatchupManifest>();
         serviceCollection.AddSingleton<IChannel, CatchupChannel>();
@@ -41,5 +42,6 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<LiveChannelsTvService>();
         serviceCollection.AddSingleton<ILiveTvService>(sp => sp.GetRequiredService<LiveChannelsTvService>());
         serviceCollection.AddSingleton<IScheduledTask, StreamCleanupTask>();
+        serviceCollection.AddSingleton<IScheduledTask, InvidiousFeedRefreshTask>();
     }
 }

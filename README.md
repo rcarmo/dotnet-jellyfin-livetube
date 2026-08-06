@@ -8,7 +8,7 @@ This repository is a maintained fork of [JPKribs/jellyfin-plugin-livechannels](h
 
 - Compound library filters: include or exclude genres and tags, match any or all values, and inherit series tags on episodes.
 - Dynamic multi-source channels with rating, year, studio, person, language and content-type filters.
-- Authenticated Invidious subscription feeds as scheduled Live TV channels.
+- Authenticated Invidious subscription feeds refreshed every four hours, with deduplicated source metadata retained for 72 hours.
 - Original-audio Invidious playback with the best H.264 representation up to 1080p.
 - Guide thumbnails cached locally; signed video and audio representations are resolved at playback time.
 - Finite **Live Channels Catch-up VOD** items for the stock Jellyfin Android TV client.
@@ -56,7 +56,9 @@ An Invidious source requires:
 
 - an absolute instance URL;
 - a read-only bearer token with `GET:feed` access;
-- a maximum feed result count between 1 and 200.
+- a maximum result count between 1 and 200 for each four-hour poll.
+
+The **Refresh YouTube Sources** scheduled task also runs at startup. It merges entries by stable video ID and retains videos published within the preceding 72 hours; a temporary fetch failure leaves the prior retained set available. This store contains feed metadata only. Video/audio media remains just-in-time and is never retained.
 
 Keep the token outside Git and plugin XML. Supply it to Jellyfin through a protected service environment variable or equivalent secret store.
 
@@ -82,7 +84,7 @@ Install it in the plugin directory and restart Jellyfin. Preserve the previous D
 After deployment:
 
 1. Confirm the plugin is active.
-2. Run Jellyfin's **Refresh Guide** scheduled task.
+2. Run **Refresh YouTube Sources**, then Jellyfin's **Refresh Guide** scheduled task.
 3. Open Live TV and play a local and an Invidious channel.
 4. Open **Live Channels Catch-up VOD** from My Media.
 5. Verify a local item and an Invidious item seek in the stock Android TV client.

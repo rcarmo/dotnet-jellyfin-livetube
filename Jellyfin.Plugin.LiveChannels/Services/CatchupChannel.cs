@@ -24,7 +24,7 @@ namespace Jellyfin.Plugin.LiveChannels.Services;
 /// Exposes recent virtual-channel programmes as finite video items. Jellyfin clients play these through the normal
 /// VOD path, so pause, seek, rewind, fast-forward and resume work without changing the Live TV client.
 /// </summary>
-public sealed class CatchupChannel : IChannel, IDisableMediaSourceDisplay, IRequiresMediaInfoCallback
+public sealed class CatchupChannel : IChannel, IDisableMediaSourceDisplay, IRequiresMediaInfoCallback, IHasCacheKey
 {
     private static readonly TimeSpan History = TimeSpan.FromHours(24);
     private readonly ChannelService _channels;
@@ -74,6 +74,9 @@ public sealed class CatchupChannel : IChannel, IDisableMediaSourceDisplay, IRequ
 
     /// <inheritdoc />
     public bool IsEnabledFor(string userId) => true;
+
+    /// <inheritdoc />
+    public string GetCacheKey(string? userId) => "v4|" + _channels.InvidiousFeedGenerationKey();
 
     /// <inheritdoc />
     public Task<ChannelItemResult> GetChannelItems(InternalChannelItemQuery query, CancellationToken cancellationToken)

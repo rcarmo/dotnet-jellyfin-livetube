@@ -33,7 +33,7 @@ public partial class ChannelService
     private readonly ILocalizationManager _localization;
     private readonly IUserManager _userManager;
     private readonly IUserDataManager _userDataManager;
-    private readonly InvidiousFeedClient _invidious;
+    private readonly InvidiousFeedStore _invidiousFeeds;
     private readonly InvidiousArtworkCache _invidiousArtwork;
     private readonly ILogger<ChannelService> _logger;
 
@@ -59,10 +59,10 @@ public partial class ChannelService
     /// <param name="userManager">The user manager, used to read server-wide watch data for the Popular channel.</param>
     /// <param name="userDataManager">The user-data manager, used to read per-item play counts for the Popular channel.</param>
     /// <param name="appPaths">The application paths, used to locate the stream root the schedule cache lives in.</param>
-    /// <param name="invidious">The authenticated Invidious subscription-feed client.</param>
+    /// <param name="invidiousFeeds">The persistent, periodically refreshed Invidious subscription-feed store.</param>
     /// <param name="invidiousArtwork">The local guide-thumbnail cache.</param>
     /// <param name="logger">The logger.</param>
-    public ChannelService(ILibraryManager libraryManager, IMediaSourceManager mediaSourceManager, ISubtitleEncoder subtitleEncoder, IPathManager pathManager, ILocalizationManager localization, IUserManager userManager, IUserDataManager userDataManager, IApplicationPaths appPaths, InvidiousFeedClient invidious, InvidiousArtworkCache invidiousArtwork, ILogger<ChannelService> logger)
+    public ChannelService(ILibraryManager libraryManager, IMediaSourceManager mediaSourceManager, ISubtitleEncoder subtitleEncoder, IPathManager pathManager, ILocalizationManager localization, IUserManager userManager, IUserDataManager userDataManager, IApplicationPaths appPaths, InvidiousFeedStore invidiousFeeds, InvidiousArtworkCache invidiousArtwork, ILogger<ChannelService> logger)
     {
         _libraryManager = libraryManager;
         _mediaSourceManager = mediaSourceManager;
@@ -71,7 +71,7 @@ public partial class ChannelService
         _localization = localization;
         _userManager = userManager;
         _userDataManager = userDataManager;
-        _invidious = invidious;
+        _invidiousFeeds = invidiousFeeds;
         _invidiousArtwork = invidiousArtwork;
         _scheduleDir = ScheduleDir(appPaths);
         _logger = logger;
@@ -192,4 +192,7 @@ public partial class ChannelService
     /// </summary>
     /// <param name="channelNumber">The channel number whose hot schedule should be dropped.</param>
     public void ReleaseFromMemory(int channelNumber) => MemorySchedules.TryRemove(channelNumber, out _);
+
+    /// <summary>Returns the retained Invidious feed generation for Jellyfin channel-response cache keys.</summary>
+    public string InvidiousFeedGenerationKey() => _invidiousFeeds.GenerationKey();
 }

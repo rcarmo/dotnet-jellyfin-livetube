@@ -38,7 +38,8 @@ The range proxy streams response bodies directly. It does not save video or audi
 
 ## Retention and bounds
 
-- Schedule history: 24 hours.
+- Invidious source metadata: videos published within the last 72 hours, merged every four hours by stable video ID.
+- Schedule history exposed as VOD: 24 hours.
 - MPD freshness before regeneration: four minutes.
 - MPD cleanup age: one hour.
 - Maximum MPD size: 2 MiB.
