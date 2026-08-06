@@ -33,6 +33,7 @@ public sealed class DirectLiveStream : ILiveStream, IDirectStreamProvider
     private readonly string _channelName;
     private readonly string _sessionDir;
     private readonly DateTime _sessionStartedUtc;
+    private readonly bool _fastRemoteStart;
     private readonly Func<Task> _close;
     private readonly Action? _onData;
     private readonly ILogger _logger;
@@ -45,10 +46,11 @@ public sealed class DirectLiveStream : ILiveStream, IDirectStreamProvider
     /// <param name="sessionDir">The session directory holding the rolling segments <see cref="GetStream"/> reads.</param>
     /// <param name="sessionStartedUtc">When the session's producer started, deciding whether readers take the whole young-session backlog or join near the live edge.</param>
     /// <param name="buildMediaSource">Builds the opened media source from the generated <see cref="UniqueId"/> (which the internal endpoint path embeds).</param>
+    /// <param name="fastRemoteStart">Whether this pure remote channel should begin with one segment instead of the local-library cushion.</param>
     /// <param name="close">Releases this viewer's consumer when Jellyfin closes the stream.</param>
     /// <param name="logger">The logger the endpoint reader lifecycle is reported to.</param>
     /// <param name="onData">Called whenever a reader actually delivers bytes, which is how the session knows a real viewer is still on the other end.</param>
-    public DirectLiveStream(string channelName, string sessionDir, DateTime sessionStartedUtc, Func<string, MediaSourceInfo> buildMediaSource, Func<Task> close, ILogger logger, Action? onData = null)
+    public DirectLiveStream(string channelName, string sessionDir, DateTime sessionStartedUtc, Func<string, MediaSourceInfo> buildMediaSource, bool fastRemoteStart, Func<Task> close, ILogger logger, Action? onData = null)
     {
         ArgumentNullException.ThrowIfNull(channelName);
         ArgumentNullException.ThrowIfNull(sessionDir);
@@ -59,6 +61,7 @@ public sealed class DirectLiveStream : ILiveStream, IDirectStreamProvider
         _channelName = channelName;
         _sessionDir = sessionDir;
         _sessionStartedUtc = sessionStartedUtc;
+        _fastRemoteStart = fastRemoteStart;
         _close = close;
         _onData = onData;
         _logger = logger;
@@ -107,7 +110,7 @@ public sealed class DirectLiveStream : ILiveStream, IDirectStreamProvider
 
         // Both distances are measured in segments and follow the configured start-up buffer, so raising the
         // buffer really does put more finished content between the viewer and the encoder.
-        var cushion = StreamArguments.SegmentsForBuffer(StreamSessionService.BufferSeconds());
+        var cushion = _fastRemoteStart ? 1 : StreamArguments.SegmentsForBuffer(StreamSessionService.BufferSeconds());
 
         // How many of the newest segments this reader withholds. Live HLS players sync a fixed few segments
         // behind whatever edge Jellyfin's delivery remux exposes — regardless of how much backlog sits earlier
@@ -116,7 +119,7 @@ public sealed class DirectLiveStream : ILiveStream, IDirectStreamProvider
         // player's own small buffer surfaces as a stall. Withholding the newest segments keeps a standing reserve
         // between producer and delivery: producer gaps shorter than the reserve are absorbed before any player
         // can notice.
-        var holdBehind = Math.Clamp(cushion, MinHoldBehind, MaxHoldBehind);
+        var holdBehind = _fastRemoteStart ? 1 : Math.Clamp(cushion, MinHoldBehind, MaxHoldBehind);
 
         // A session still holding its whole initial-burst backlog serves it all: its oldest segment is the exact
         // position the schedule asked for at tune-in, so the burst becomes the player's opening cushion instead
@@ -126,7 +129,7 @@ public sealed class DirectLiveStream : ILiveStream, IDirectStreamProvider
         // hold-back so a joining reader always has something servable immediately.
         var headStart = StreamArguments.HeadStartFor(StreamSessionService.BufferSeconds());
         var fresh = DateTime.UtcNow - _sessionStartedUtc < TimeSpan.FromSeconds(headStart + 60);
-        var startBehind = fresh ? Math.Max(8, cushion * 2) : holdBehind + 1;
+        var startBehind = _fastRemoteStart ? 1 : (fresh ? Math.Max(8, cushion * 2) : holdBehind + 1);
 
         _logger.LogInformation("Live Channels: {Channel}: endpoint reader {Reader} connected (live id {Id})", _channelName, reader, MediaSource.Id);
         return new SegmentConcatStream(

@@ -303,7 +303,8 @@ public sealed class LiveChannelsTvService : ILiveTvService, ISupportsNewTimerIds
             session.ChannelName,
             session.Path,
             session.StartedUtc,
-            uniqueId => BuildOpenedSource(liveStreamId, uniqueId),
+            uniqueId => BuildOpenedSource(liveStreamId, uniqueId, session.FastRemoteStart),
+            session.FastRemoteStart,
             () => CloseLiveStream(liveStreamId, CancellationToken.None),
             _logger,
             session.MarkData);
@@ -423,7 +424,7 @@ public sealed class LiveChannelsTvService : ILiveTvService, ISupportsNewTimerIds
                 // below; the logo is usually cached, but its first-ever generation must not sit on the tune-in
                 // critical path.
                 var worker = StartProducer(channel, dir, cts, stats);
-                session = new LiveSession(liveStreamId, cts, worker, dir, channel.Name, channelId, channel.Number, DateTime.UtcNow, stats);
+                session = new LiveSession(liveStreamId, cts, worker, dir, channel.Name, channelId, channel.Number, DateTime.UtcNow, FastRemoteStart(channel), stats);
                 session.AddConsumer(liveStreamId);
                 _live[liveStreamId] = session;
                 _byChannel[channelId] = session;
@@ -1456,7 +1457,7 @@ public sealed class LiveChannelsTvService : ILiveTvService, ISupportsNewTimerIds
     // probe has real content to read; probing a continuous TS is also immune to the 10.11.10+ probe container
     // normalisation that broke probing the HLS playlist directly (it rewrote the container to "ts" and delivery
     // then ran `-f mpegts` against a .m3u8 -- fatal on every tune-in).
-    private MediaSourceInfo BuildOpenedSource(string liveStreamId, string uniqueId)
+    private MediaSourceInfo BuildOpenedSource(string liveStreamId, string uniqueId, bool fastRemoteStart)
     {
         return new MediaSourceInfo
         {
@@ -1471,8 +1472,9 @@ public sealed class LiveChannelsTvService : ILiveTvService, ISupportsNewTimerIds
             // Pre-roll the configured start-up buffer on the client so playback starts on a full buffer instead
             // of stuttering while it fills (the declarative form of pausing briefly then resuming on tune-in).
             // The handover already waited for that much content to exist, so this fills at I/O speed off the disk
-            // rather than at realtime.
-            BufferMs = StreamSessionService.BufferSeconds() * 1000,
+            // rather than at realtime. Pure remote channels hand over after one segment and request only that
+            // segment as pre-roll; local-library channels retain the configured boundary cushion.
+            BufferMs = (fastRemoteStart ? StreamArguments.SegmentSeconds : StreamSessionService.BufferSeconds()) * 1000,
             RequiresOpening = false,
             RequiresClosing = true,
             SupportsDirectPlay = false,
@@ -1648,7 +1650,7 @@ public sealed class LiveChannelsTvService : ILiveTvService, ISupportsNewTimerIds
         private long _lastDataTicks;
         private DateTime _lastRestartUtc = DateTime.MinValue;
 
-        public LiveSession(string id, CancellationTokenSource cts, Task worker, string path, string channelName, string channelId, int number, DateTime startedUtc, SessionStats stats)
+        public LiveSession(string id, CancellationTokenSource cts, Task worker, string path, string channelName, string channelId, int number, DateTime startedUtc, bool fastRemoteStart, SessionStats stats)
         {
             Id = id;
             Cts = cts;
@@ -1658,6 +1660,7 @@ public sealed class LiveChannelsTvService : ILiveTvService, ISupportsNewTimerIds
             ChannelId = channelId;
             Number = number;
             StartedUtc = startedUtc;
+            FastRemoteStart = fastRemoteStart;
             Stats = stats;
         }
 
@@ -1684,6 +1687,8 @@ public sealed class LiveChannelsTvService : ILiveTvService, ISupportsNewTimerIds
         public int Number { get; }
 
         public DateTime StartedUtc { get; }
+
+        public bool FastRemoteStart { get; }
 
         public SessionStats Stats { get; }
 
