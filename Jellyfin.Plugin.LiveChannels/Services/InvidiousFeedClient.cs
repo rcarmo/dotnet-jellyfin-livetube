@@ -153,6 +153,35 @@ public sealed class InvidiousFeedClient
             alternate.Remove();
         }
 
+        var videoSets = document.Descendants(ns + "AdaptationSet").Where(a => !IsAudioAdaptation(a)).ToList();
+        var selectedVideo = videoSets
+            .SelectMany(a => a.Elements(ns + "Representation"))
+            .Where(r => ((string?)r.Attribute("codecs"))?.StartsWith("avc1", StringComparison.OrdinalIgnoreCase) == true)
+            .Where(r => ((int?)r.Attribute("height") ?? 0) is > 0 and <= 1080)
+            .OrderByDescending(r => (int?)r.Attribute("height") ?? 0)
+            .ThenByDescending(r => (long?)r.Attribute("bandwidth") ?? 0)
+            .FirstOrDefault()
+            ?? throw new InvalidDataException("Invidious DASH manifest has no H.264 video representation up to 1080p.");
+        var selectedVideoSet = selectedVideo.Parent
+            ?? throw new InvalidDataException("The selected Invidious video representation has no adaptation set.");
+        foreach (var videoSet in videoSets)
+        {
+            if (!ReferenceEquals(videoSet, selectedVideoSet))
+            {
+                videoSet.Remove();
+            }
+        }
+
+        foreach (var alternateVideo in selectedVideoSet.Elements(ns + "Representation").Where(r => !ReferenceEquals(r, selectedVideo)).ToList())
+        {
+            alternateVideo.Remove();
+        }
+
+        // Jellyfin's callback descriptor declares video index 0 and audio index 1. Keep the MPD ordering identical
+        // so its generated -map arguments select the intended H.264 representation and original audio.
+        selectedVideoSet.Remove();
+        original.AddBeforeSelf(selectedVideoSet);
+
         // A downloaded MPD would otherwise resolve its relative /companion/videoplayback BaseURLs against the
         // local file path. Make every media URL absolute against the final redirected manifest URI.
         var baseUri = response.RequestMessage?.RequestUri ?? new Uri(manifestUrl);

@@ -113,7 +113,8 @@ public class InvidiousFeedClientTests
                   <Representation id="140-en"><BaseURL>/original.m4a</BaseURL></Representation>
                 </AdaptationSet>
                 <AdaptationSet contentType="video">
-                  <Representation id="137"><BaseURL>/video.mp4</BaseURL></Representation>
+                  <Representation id="137" codecs="avc1.640028" height="1080" bandwidth="5000000"><BaseURL>/video.mp4</BaseURL></Representation>
+                  <Representation id="136" codecs="avc1.4d401f" height="720" bandwidth="2500000"><BaseURL>/video-720.mp4</BaseURL></Representation>
                 </AdaptationSet>
               </Period>
             </MPD>
