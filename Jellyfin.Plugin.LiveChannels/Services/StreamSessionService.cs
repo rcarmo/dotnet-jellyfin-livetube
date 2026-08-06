@@ -504,6 +504,19 @@ public class StreamSessionService
         var input = program.IsInvidious
             ? InvidiousFeedClient.BuildDashUrl(program.InvidiousUrl ?? string.Empty, program.Path)
             : program.Path;
+
+        // Invidious's local DASH proxy does not support a deep input seek efficiently: ffmpeg walks fragmented
+        // media from the beginning and can produce no frames before the tune-in deadline. Start the current remote
+        // video at its beginning instead, but cap it to the programme's remaining scheduled time so the next guide
+        // boundary and every subsequent item stay aligned. Items reached normally already have a zero offset.
+        var inputOffset = program.IsInvidious ? TimeSpan.Zero : offset;
+        var inputDurationLimit = durationLimit;
+        if (program.IsInvidious && offset > TimeSpan.Zero && durationLimit is null)
+        {
+            var remaining = TimeSpan.FromTicks(program.DurationTicks) - offset;
+            inputDurationLimit = remaining > TimeSpan.Zero ? remaining : TimeSpan.FromSeconds(1);
+        }
+
         var subtitle = ChannelService.FindBurnInSubtitle(program, channel.SubtitleBurnIn);
 
         // Burn the file Jellyfin extracted into its own subtitle cache, the same source its transcodes burn, not
@@ -535,7 +548,7 @@ public class StreamSessionService
             }
         }
 
-        var (args, hardwareDecode) = BuildArguments(input, offset, timeline, subtitle, program.SourceHeight, subtitlePath, softwareDecode: false, program.IsHdr, program.DefaultAudioOrdinal, burstSeconds(), durationLimit, subtitleFonts);
+        var (args, hardwareDecode) = BuildArguments(input, inputOffset, timeline, subtitle, program.SourceHeight, subtitlePath, softwareDecode: false, program.IsHdr, program.DefaultAudioOrdinal, burstSeconds(), inputDurationLimit, subtitleFonts);
         var (total, lastOut, exitCode) = await RunFfmpegAsync(ffmpeg, args, program.Title, output, cancellationToken, stats).ConfigureAwait(false);
 
         // The per-item path has no continuous decoder to fall back, so retry a hardware-decode that produced
@@ -543,7 +556,7 @@ public class StreamSessionService
         if (total == 0 && hardwareDecode && !cancellationToken.IsCancellationRequested)
         {
             _logger.LogWarning("Channel {Name}: hardware decode produced no output for \"{Title}\"; retrying in software", channel.Name, program.Title);
-            var (swArgs, _) = BuildArguments(input, offset, timeline, subtitle, program.SourceHeight, subtitlePath, softwareDecode: true, program.IsHdr, program.DefaultAudioOrdinal, burstSeconds(), durationLimit, subtitleFonts);
+            var (swArgs, _) = BuildArguments(input, inputOffset, timeline, subtitle, program.SourceHeight, subtitlePath, softwareDecode: true, program.IsHdr, program.DefaultAudioOrdinal, burstSeconds(), inputDurationLimit, subtitleFonts);
             (total, lastOut, exitCode) = await RunFfmpegAsync(ffmpeg, swArgs, program.Title, output, cancellationToken, stats).ConfigureAwait(false);
         }
 
