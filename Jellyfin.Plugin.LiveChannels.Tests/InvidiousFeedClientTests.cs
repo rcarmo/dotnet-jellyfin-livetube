@@ -135,7 +135,7 @@ public class InvidiousFeedClientTests
             Assert.Equal("en-US", (string?)audio[0].Attribute("lang"));
             var audioBaseUrl = audio[0].Descendants(ns + "BaseURL").Single();
             Assert.Equal("http://invidious.test/original.m4a", audioBaseUrl.Value);
-            Assert.IsType<XCData>(audioBaseUrl.FirstNode);
+            Assert.IsType<XText>(audioBaseUrl.FirstNode);
             Assert.Equal("http://invidious.test/video.mp4", document.Descendants(ns + "AdaptationSet").Single(e => (string?)e.Attribute("contentType") == "video").Descendants(ns + "BaseURL").Single().Value);
         }
         finally

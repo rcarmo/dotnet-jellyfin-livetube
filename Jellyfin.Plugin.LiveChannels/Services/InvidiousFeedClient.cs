@@ -160,10 +160,9 @@ public sealed class InvidiousFeedClient
         {
             if (Uri.TryCreate(baseUri, baseUrl.Value.Trim(), out var absolute))
             {
-                // ffmpeg's DASH XML reader does not preserve entity-decoded ampersands in a local MPD's
-                // BaseURL query string ("?a=1&amp;b=2" became "?a=1b=2", invalidating YouTube's signature).
-                // CDATA carries the signed URL byte-for-byte while remaining valid XML.
-                baseUrl.ReplaceNodes(new XCData(absolute.ToString()));
+                // Keep the URL as normal XML text. The DASH demuxer decodes &amp; back to '&'; CDATA makes its
+                // XML reader drop the ampersands and concatenate signed query parameters, yielding HTTP 403.
+                baseUrl.Value = absolute.ToString();
             }
         }
 
