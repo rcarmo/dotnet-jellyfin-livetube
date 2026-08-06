@@ -32,6 +32,7 @@ public class StreamSessionService
     private readonly IMediaEncoder _encoder;
     private readonly ChannelService _channels;
     private readonly EncoderResolver _encoders;
+    private readonly InvidiousFeedClient _invidious;
     private readonly ILogger<StreamSessionService> _logger;
 
     /// <summary>
@@ -40,12 +41,14 @@ public class StreamSessionService
     /// <param name="encoder">The media encoder, used to locate ffmpeg.</param>
     /// <param name="channels">The channel service, used to resolve and schedule the channel's items.</param>
     /// <param name="encoders">The encoder resolver, used to pick software/hardware encoders.</param>
+    /// <param name="invidious">The Invidious client, used to resolve a manifest to its original audio track.</param>
     /// <param name="logger">The logger.</param>
-    public StreamSessionService(IMediaEncoder encoder, ChannelService channels, EncoderResolver encoders, ILogger<StreamSessionService> logger)
+    public StreamSessionService(IMediaEncoder encoder, ChannelService channels, EncoderResolver encoders, InvidiousFeedClient invidious, ILogger<StreamSessionService> logger)
     {
         _encoder = encoder;
         _channels = channels;
         _encoders = encoders;
+        _invidious = invidious;
         _logger = logger;
     }
 
@@ -418,9 +421,28 @@ public class StreamSessionService
                 await StreamSlateAsync(ffmpeg, timeline, output, cancellationToken).ConfigureAwait(false);
                 break;
             }
+            else if (program.IsInvidious)
+            {
+                // Never substitute the next YouTube item under the failed item's EPG slot. Fill exactly the
+                // remainder of this slot with standby, then advance at the advertised boundary so guide and
+                // picture remain truthful even when one remote video or manifest is unavailable.
+                var remaining = step.DurationLimit ?? (TimeSpan.FromTicks(program.DurationTicks) - step.Offset);
+                if (remaining > TimeSpan.Zero)
+                {
+                    _logger.LogWarning(
+                        "Channel {Name}: remote video {VideoId} failed; showing standby for the remaining {Seconds:F0}s of its slot",
+                        channel.Name,
+                        program.Path,
+                        remaining.TotalSeconds);
+                    await StreamSlateForAsync(ffmpeg, timeline, remaining, output, cancellationToken).ConfigureAwait(false);
+                    timeline += remaining;
+                }
+
+                consecutiveFailures = 0;
+            }
             else
             {
-                // A missing item returns instantly; pause briefly so a run of them can't busy-spin the CPU.
+                // A missing local item returns instantly; pause briefly so a run of them can't busy-spin the CPU.
                 try
                 {
                     await Task.Delay(TimeSpan.FromMilliseconds(200), cancellationToken).ConfigureAwait(false);
@@ -501,9 +523,35 @@ public class StreamSessionService
             return (false, -1);
         }
 
-        var input = program.IsInvidious
-            ? InvidiousFeedClient.BuildDashUrl(program.InvidiousUrl ?? string.Empty, program.Path)
-            : program.Path;
+        var input = program.Path;
+        string? filteredManifest = null;
+        if (program.IsInvidious)
+        {
+            try
+            {
+                filteredManifest = Path.Combine(Path.GetTempPath(), "livechannels-" + program.Path + "-" + Guid.NewGuid().ToString("N") + ".mpd");
+                var language = await _invidious.WriteOriginalAudioDashManifestAsync(
+                    program.InvidiousUrl ?? string.Empty,
+                    program.Path,
+                    filteredManifest,
+                    cancellationToken).ConfigureAwait(false);
+                input = filteredManifest;
+                _logger.LogInformation(
+                    "Live Channels: remote video {VideoId} resolved to original audio {Language}",
+                    program.Path,
+                    string.IsNullOrWhiteSpace(language) ? "(unlabelled)" : language);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                if (filteredManifest is not null)
+                {
+                    TryDeleteFile(filteredManifest);
+                }
+
+                _logger.LogWarning(ex, "Live Channels: refusing remote video {VideoId} because its original audio could not be selected", program.Path);
+                return (false, -1);
+            }
+        }
 
         // Invidious's local DASH proxy does not support a deep input seek efficiently: ffmpeg walks fragmented
         // media from the beginning and can produce no frames before the tune-in deadline. Start the current remote
@@ -548,16 +596,29 @@ public class StreamSessionService
             }
         }
 
-        var (args, hardwareDecode) = BuildArguments(input, inputOffset, timeline, subtitle, program.SourceHeight, subtitlePath, softwareDecode: false, program.IsHdr, program.DefaultAudioOrdinal, burstSeconds(), inputDurationLimit, subtitleFonts);
-        var (total, lastOut, exitCode) = await RunFfmpegAsync(ffmpeg, args, program.Title, output, cancellationToken, stats).ConfigureAwait(false);
-
-        // The per-item path has no continuous decoder to fall back, so retry a hardware-decode that produced
-        // nothing (e.g. a codec the GPU can't decode) once in software, so one bad item can't blank the channel.
-        if (total == 0 && hardwareDecode && !cancellationToken.IsCancellationRequested)
+        long total;
+        double lastOut;
+        int exitCode;
+        try
         {
-            _logger.LogWarning("Channel {Name}: hardware decode produced no output for \"{Title}\"; retrying in software", channel.Name, program.Title);
-            var (swArgs, _) = BuildArguments(input, inputOffset, timeline, subtitle, program.SourceHeight, subtitlePath, softwareDecode: true, program.IsHdr, program.DefaultAudioOrdinal, burstSeconds(), inputDurationLimit, subtitleFonts);
-            (total, lastOut, exitCode) = await RunFfmpegAsync(ffmpeg, swArgs, program.Title, output, cancellationToken, stats).ConfigureAwait(false);
+            var (args, hardwareDecode) = BuildArguments(input, inputOffset, timeline, subtitle, program.SourceHeight, subtitlePath, softwareDecode: false, program.IsHdr, program.DefaultAudioOrdinal, burstSeconds(), inputDurationLimit, subtitleFonts);
+            (total, lastOut, exitCode) = await RunFfmpegAsync(ffmpeg, args, program.Title, output, cancellationToken, stats).ConfigureAwait(false);
+
+            // The per-item path has no continuous decoder to fall back, so retry a hardware-decode that produced
+            // nothing (e.g. a codec the GPU can't decode) once in software, so one bad item can't blank the channel.
+            if (total == 0 && hardwareDecode && !cancellationToken.IsCancellationRequested)
+            {
+                _logger.LogWarning("Channel {Name}: hardware decode produced no output for \"{Title}\"; retrying in software", channel.Name, program.Title);
+                var (swArgs, _) = BuildArguments(input, inputOffset, timeline, subtitle, program.SourceHeight, subtitlePath, softwareDecode: true, program.IsHdr, program.DefaultAudioOrdinal, burstSeconds(), inputDurationLimit, subtitleFonts);
+                (total, lastOut, exitCode) = await RunFfmpegAsync(ffmpeg, swArgs, program.Title, output, cancellationToken, stats).ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            if (filteredManifest is not null)
+            {
+                TryDeleteFile(filteredManifest);
+            }
         }
 
         // A clean (exit 0), uncancelled run of a WHOLE item (no tune-in seek) reveals the item's true
@@ -578,19 +639,36 @@ public class StreamSessionService
         return (total > 0, lastOut);
     }
 
+    private static void TryDeleteFile(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch
+        {
+            // Best effort: the OS temporary directory is cleaned independently.
+        }
+    }
+
     // Streams a standby slate (colour bars + silence), looped, until the client disconnects. Shown when a
     // channel has no playable content so viewers get an intentional standby card, not a black screen. Starts on
     // the channel timeline where the caller left off (after any items that did play), so timestamps never regress.
-    private async Task StreamSlateAsync(string ffmpeg, TimeSpan timelineBase, Stream output, CancellationToken cancellationToken)
+    private Task StreamSlateAsync(string ffmpeg, TimeSpan timelineBase, Stream output, CancellationToken cancellationToken)
+        => StreamSlateForAsync(ffmpeg, timelineBase, null, output, cancellationToken);
+
+    private async Task StreamSlateForAsync(string ffmpeg, TimeSpan timelineBase, TimeSpan? maximumDuration, Stream output, CancellationToken cancellationToken)
     {
         var (width, bitrate) = Plugin.Instance?.ReadConfiguration(c => (c.TranscodeWidth, c.TranscodeVideoBitrateKbps))
             ?? (1280, 4000);
-        const double clipSeconds = 10.0;
+        const double maxClipSeconds = 10.0;
 
         var font = FontLocator.Find();
         var timeline = timelineBase;
-        while (!cancellationToken.IsCancellationRequested)
+        var remaining = maximumDuration;
+        while (!cancellationToken.IsCancellationRequested && (remaining is null || remaining > TimeSpan.Zero))
         {
+            var clipSeconds = remaining is { } value ? Math.Min(maxClipSeconds, value.TotalSeconds) : maxClipSeconds;
             var args = StreamArguments.BuildSlate(width, bitrate, clipSeconds, timeline, font);
             var started = DateTime.UtcNow;
             var (total, _, _) = await RunFfmpegAsync(ffmpeg, args, "standby", output, cancellationToken).ConfigureAwait(false);
@@ -613,7 +691,12 @@ public class StreamSessionService
                 }
             }
 
-            timeline += TimeSpan.FromSeconds(clipSeconds);
+            var clip = TimeSpan.FromSeconds(clipSeconds);
+            timeline += clip;
+            if (remaining is not null)
+            {
+                remaining -= clip;
+            }
         }
     }
 

@@ -2,9 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Net.Http;
+using System.IO;
+using System.Linq;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Threading;
+using System.Xml.Linq;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.LiveChannels.Models;
 
@@ -73,6 +76,77 @@ public sealed class InvidiousFeedClient
 
         return new Uri(root, "api/manifest/dash/id/" + Uri.EscapeDataString(videoId.Trim()) + "?local=true").ToString();
     }
+
+    /// <summary>
+    /// Downloads a video's DASH manifest and writes a playback manifest containing only its explicitly marked
+    /// original audio adaptation set. YouTube places auto-dubbed tracks before the original in some manifests;
+    /// leaving selection to ffmpeg can therefore play an arbitrary dub even with <c>-map 0:a:0</c>.
+    /// </summary>
+    /// <param name="instanceUrl">The instance root URL.</param>
+    /// <param name="videoId">The stable YouTube video id.</param>
+    /// <param name="destinationPath">The local path to write.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The selected audio language, when declared by the manifest.</returns>
+    public async Task<string?> WriteOriginalAudioDashManifestAsync(
+        string instanceUrl,
+        string videoId,
+        string destinationPath,
+        CancellationToken cancellationToken)
+    {
+        var manifestUrl = BuildDashUrl(instanceUrl, videoId);
+        using var response = await _httpClient.GetAsync(manifestUrl, cancellationToken).ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+        var xml = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        var document = XDocument.Parse(xml, LoadOptions.PreserveWhitespace);
+        var ns = document.Root?.Name.Namespace ?? XNamespace.None;
+        var audioSets = document.Descendants(ns + "AdaptationSet")
+            .Where(IsAudioAdaptation)
+            .ToList();
+        if (audioSets.Count == 0)
+        {
+            throw new InvalidDataException("Invidious DASH manifest has no audio adaptation set.");
+        }
+
+        var original = audioSets
+            .Where(a => HasRole(a, ns, "main") && !HasRole(a, ns, "enhanced-audio-intelligibility"))
+            .FirstOrDefault()
+            ?? audioSets.FirstOrDefault(a => HasRole(a, ns, "main"))
+            ?? audioSets.Where(a => !HasRole(a, ns, "alternate") && !HasRole(a, ns, "dub")).SingleOrDefault()
+            ?? (audioSets.Count == 1 ? audioSets[0] : null);
+        if (original is null)
+        {
+            throw new InvalidDataException("Invidious DASH manifest does not identify one original audio track.");
+        }
+
+        foreach (var alternate in audioSets.Where(a => !ReferenceEquals(a, original)).ToList())
+        {
+            alternate.Remove();
+        }
+
+        // A downloaded MPD would otherwise resolve its relative /companion/videoplayback BaseURLs against the
+        // local file path. Make every media URL absolute against the final redirected manifest URI.
+        var baseUri = response.RequestMessage?.RequestUri ?? new Uri(manifestUrl);
+        foreach (var baseUrl in document.Descendants(ns + "BaseURL"))
+        {
+            if (Uri.TryCreate(baseUri, baseUrl.Value.Trim(), out var absolute))
+            {
+                baseUrl.Value = absolute.ToString();
+            }
+        }
+
+        using var destination = new FileStream(destinationPath, FileMode.Create, FileAccess.Write, FileShare.Read, 8192, useAsync: true);
+        await document.SaveAsync(destination, SaveOptions.DisableFormatting, cancellationToken).ConfigureAwait(false);
+        await destination.FlushAsync(cancellationToken).ConfigureAwait(false);
+        return (string?)original.Attribute("lang");
+    }
+
+    private static bool IsAudioAdaptation(XElement adaptation)
+        => string.Equals((string?)adaptation.Attribute("contentType"), "audio", StringComparison.OrdinalIgnoreCase)
+            || ((string?)adaptation.Attribute("mimeType"))?.StartsWith("audio/", StringComparison.OrdinalIgnoreCase) == true;
+
+    private static bool HasRole(XElement adaptation, XNamespace ns, string role)
+        => adaptation.Elements(ns + "Role")
+            .Any(r => string.Equals((string?)r.Attribute("value"), role, StringComparison.OrdinalIgnoreCase));
 
     private static Uri ParseInstanceUrl(string instanceUrl)
     {

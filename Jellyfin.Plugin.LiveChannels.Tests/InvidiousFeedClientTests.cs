@@ -1,7 +1,10 @@
 using System;
+using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Threading;
+using System.Xml.Linq;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.LiveChannels.Services;
 using Xunit;
@@ -65,6 +68,76 @@ public class InvidiousFeedClientTests
         Assert.Equal(
             "http://invidious.test/api/manifest/dash/id/abc123?local=true",
             InvidiousFeedClient.BuildDashUrl("http://invidious.test", "abc123"));
+    }
+
+    [Fact]
+    public async Task WriteOriginalAudioDashManifestAsync_RemovesDubsAndKeepsMainAudio()
+    {
+        const string mpd = """
+            <MPD xmlns="urn:mpeg:dash:schema:mpd:2011">
+              <Period>
+                <AdaptationSet contentType="audio" lang="hi">
+                  <Role schemeIdUri="urn:mpeg:dash:role:2011" value="alternate" />
+                  <Role schemeIdUri="urn:mpeg:dash:role:2011" value="dub" />
+                  <Representation id="140-hi"><BaseURL>/dub.m4a</BaseURL></Representation>
+                </AdaptationSet>
+                <AdaptationSet contentType="audio" lang="en-US">
+                  <Role schemeIdUri="urn:mpeg:dash:role:2011" value="main" />
+                  <Representation id="140-en"><BaseURL>/original.m4a</BaseURL></Representation>
+                </AdaptationSet>
+                <AdaptationSet contentType="video">
+                  <Representation id="137"><BaseURL>/video.mp4</BaseURL></Representation>
+                </AdaptationSet>
+              </Period>
+            </MPD>
+            """;
+        var client = new InvidiousFeedClient(new HttpClient(new StubHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(mpd)
+        }))));
+        var path = Path.GetTempFileName();
+        try
+        {
+            var language = await client.WriteOriginalAudioDashManifestAsync("http://invidious.test", "abc123", path, CancellationToken.None);
+            var document = XDocument.Load(path);
+            var ns = document.Root!.Name.Namespace;
+            var audio = document.Descendants(ns + "AdaptationSet").Where(e => (string?)e.Attribute("contentType") == "audio").ToList();
+
+            Assert.Equal("en-US", language);
+            Assert.Single(audio);
+            Assert.Equal("en-US", (string?)audio[0].Attribute("lang"));
+            Assert.Equal("http://invidious.test/original.m4a", audio[0].Descendants(ns + "BaseURL").Single().Value);
+            Assert.Equal("http://invidious.test/video.mp4", document.Descendants(ns + "AdaptationSet").Single(e => (string?)e.Attribute("contentType") == "video").Descendants(ns + "BaseURL").Single().Value);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task WriteOriginalAudioDashManifestAsync_RejectsAmbiguousDubOnlyManifest()
+    {
+        const string mpd = """
+            <MPD xmlns="urn:mpeg:dash:schema:mpd:2011"><Period>
+              <AdaptationSet contentType="audio" lang="hi"><Role value="dub" /><Representation id="hi" /></AdaptationSet>
+              <AdaptationSet contentType="audio" lang="de"><Role value="dub" /><Representation id="de" /></AdaptationSet>
+              <AdaptationSet contentType="video"><Representation id="video" /></AdaptationSet>
+            </Period></MPD>
+            """;
+        var client = new InvidiousFeedClient(new HttpClient(new StubHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(mpd)
+        }))));
+        var path = Path.GetTempFileName();
+        try
+        {
+            await Assert.ThrowsAsync<InvalidDataException>(() => client.WriteOriginalAudioDashManifestAsync("http://invidious.test", "abc123", path, CancellationToken.None));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
     }
 
     [Theory]
