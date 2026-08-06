@@ -20,7 +20,7 @@ This repository is a maintained fork of [JPKribs/jellyfin-plugin-livechannels](h
 ```text
 Jellyfin library ─┐
                   ├─ ChannelService ─ schedule/guide ─ ILiveTvService ─ Android TV Live TV
-Invidious feed ───┘                         │
+Invidious feed ───┘                        │
                                            └─ IChannel catch-up catalogue
                                                 ├─ local file (finite VOD)
                                                 └─ short-lived MPD
