@@ -1,0 +1,115 @@
+using System;
+using System.Collections.Concurrent;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using MediaBrowser.Common.Configuration;
+
+namespace Jellyfin.Plugin.LiveChannels.Services;
+
+/// <summary>Writes short-lived local DASH control manifests for remote Invidious catch-up playback.</summary>
+public sealed class InvidiousCatchupManifest
+{
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> Gates = new(StringComparer.Ordinal);
+    private static readonly TimeSpan MaximumAge = TimeSpan.FromMinutes(4);
+    private static readonly TimeSpan CleanupAge = TimeSpan.FromHours(1);
+    private readonly InvidiousFeedClient _invidious;
+    private readonly string _root;
+
+    /// <summary>Initializes the manifest store.</summary>
+    public InvidiousCatchupManifest(InvidiousFeedClient invidious, IApplicationPaths paths)
+    {
+        ArgumentNullException.ThrowIfNull(invidious);
+        ArgumentNullException.ThrowIfNull(paths);
+        _invidious = invidious;
+        _root = Path.Combine(paths.CachePath, "livechannels-assets", "catchup-manifests");
+    }
+
+    /// <summary>
+    /// Returns a fresh local MPD that references remote video and original-audio representations. The MPD contains
+    /// no media payload and is replaced before its signed representation URLs become stale.
+    /// </summary>
+    public async Task<string> GetAsync(string instanceUrl, string videoId, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(instanceUrl);
+        var key = SanitizeVideoId(videoId);
+        var gate = Gates.GetOrAdd(key, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            Directory.CreateDirectory(_root);
+            var destination = Path.Combine(_root, key + ".mpd");
+            if (File.Exists(destination) && DateTime.UtcNow - File.GetLastWriteTimeUtc(destination) < MaximumAge)
+            {
+                return destination;
+            }
+
+            var temporary = destination + "." + Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture) + ".tmp";
+            try
+            {
+                await _invidious.WriteOriginalAudioDashManifestAsync(instanceUrl, videoId, temporary, cancellationToken).ConfigureAwait(false);
+                if (new FileInfo(temporary).Length is <= 0 or > 2 * 1024 * 1024)
+                {
+                    throw new InvalidDataException("The Invidious DASH control manifest has an invalid size.");
+                }
+
+                File.Move(temporary, destination, overwrite: true);
+                Cleanup(_root, CleanupAge, destination);
+                return destination;
+            }
+            finally
+            {
+                TryDelete(temporary);
+            }
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    internal static void Cleanup(string root, TimeSpan maximumAge, string protectedPath)
+    {
+        if (!Directory.Exists(root))
+        {
+            return;
+        }
+
+        var cutoff = DateTime.UtcNow - maximumAge;
+        foreach (var file in new DirectoryInfo(root).EnumerateFiles("*.mpd").Where(file => file.LastWriteTimeUtc < cutoff))
+        {
+            if (!string.Equals(file.FullName, protectedPath, StringComparison.Ordinal))
+            {
+                TryDelete(file.FullName);
+            }
+        }
+    }
+
+    private static string SanitizeVideoId(string videoId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(videoId);
+        var value = videoId.Trim();
+        if (value.Length is < 1 or > 64 || value.Any(character => !char.IsAsciiLetterOrDigit(character) && character is not '-' and not '_'))
+        {
+            throw new ArgumentException("The Invidious video ID contains invalid characters.", nameof(videoId));
+        }
+
+        return value;
+    }
+
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+    }
+}

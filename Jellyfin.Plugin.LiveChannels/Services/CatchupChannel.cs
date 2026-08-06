@@ -30,19 +30,19 @@ public sealed class CatchupChannel : IChannel, IDisableMediaSourceDisplay, IRequ
     private readonly ChannelService _channels;
     private readonly ILibraryManager _libraryManager;
     private readonly IUserManager _userManager;
-    private readonly InvidiousCatchupCache _invidiousCache;
+    private readonly InvidiousCatchupManifest _invidiousManifest;
 
     /// <summary>Initializes the catch-up catalogue.</summary>
-    public CatchupChannel(ChannelService channels, ILibraryManager libraryManager, IUserManager userManager, InvidiousCatchupCache invidiousCache)
+    public CatchupChannel(ChannelService channels, ILibraryManager libraryManager, IUserManager userManager, InvidiousCatchupManifest invidiousManifest)
     {
         ArgumentNullException.ThrowIfNull(channels);
         ArgumentNullException.ThrowIfNull(libraryManager);
         ArgumentNullException.ThrowIfNull(userManager);
-        ArgumentNullException.ThrowIfNull(invidiousCache);
+        ArgumentNullException.ThrowIfNull(invidiousManifest);
         _channels = channels;
         _libraryManager = libraryManager;
         _userManager = userManager;
-        _invidiousCache = invidiousCache;
+        _invidiousManifest = invidiousManifest;
     }
 
     /// <inheritdoc />
@@ -142,7 +142,7 @@ public sealed class CatchupChannel : IChannel, IDisableMediaSourceDisplay, IRequ
 
             if (slot.Program.IsInvidious && !string.IsNullOrEmpty(slot.Program.Path) && !string.IsNullOrEmpty(slot.Program.InvidiousUrl))
             {
-                var path = await _invidiousCache.MaterializeAsync(slot.Program.InvidiousUrl, slot.Program.Path, cancellationToken).ConfigureAwait(false);
+                var path = await _invidiousManifest.GetAsync(slot.Program.InvidiousUrl, slot.Program.Path, cancellationToken).ConfigureAwait(false);
                 return new[] { BuildMediaSource(channel.Id, slot, path) };
             }
         }
