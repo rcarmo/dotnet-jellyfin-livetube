@@ -212,6 +212,9 @@ public sealed class CatchupChannel : IChannel, IDisableMediaSourceDisplay, IRequ
         ArgumentNullException.ThrowIfNull(manifest);
         var source = BuildMediaSource(channelId, slot, manifest.Path);
         var width = (int)Math.Round(manifest.VideoHeight * 16.0 / 9.0);
+        // FFmpeg's DASH demuxer is named "dash"; advertising the .mpd extension as the container makes Jellyfin
+        // force the nonexistent input format `-f mpd`, even though the control file itself is a valid MPD.
+        source.Container = "dash";
         source.SupportsDirectPlay = false;
         source.SupportsDirectStream = false;
         source.SupportsProbing = false;

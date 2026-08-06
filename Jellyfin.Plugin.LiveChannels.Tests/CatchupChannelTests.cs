@@ -59,7 +59,7 @@ public sealed class CatchupChannelTests
             slot,
             new InvidiousCatchupManifestResult("/cache/video-id.mpd", "en-US", 1080));
 
-        Assert.Equal("mpd", source.Container);
+        Assert.Equal("dash", source.Container);
         Assert.False(source.IsInfiniteStream);
         Assert.False(source.SupportsProbing);
         Assert.False(source.SupportsDirectPlay);
