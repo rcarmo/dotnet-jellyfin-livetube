@@ -3,6 +3,7 @@ using System.Net.Http;
 using Jellyfin.Plugin.LiveChannels.Services;
 using JPKribs.Jellyfin.Base;
 using MediaBrowser.Controller;
+using MediaBrowser.Controller.Channels;
 using MediaBrowser.Controller.LiveTv;
 using MediaBrowser.Controller.Plugins;
 using MediaBrowser.Model.Tasks;
@@ -25,6 +26,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
             Path.Combine(sp.GetRequiredService<MediaBrowser.Common.Configuration.IApplicationPaths>().CachePath, "livechannels-assets", "invidious"),
             sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<InvidiousArtworkCache>>()));
         serviceCollection.AddSingleton<ChannelService>();
+        serviceCollection.AddSingleton<IChannel, CatchupChannel>();
         serviceCollection.AddSingleton<EncoderResolver>();
         serviceCollection.AddSingleton<StreamSessionService>();
         serviceCollection.AddSingleton<StressTestService>();
