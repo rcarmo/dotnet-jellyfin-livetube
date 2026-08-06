@@ -34,6 +34,7 @@ public partial class ChannelService
     private readonly IUserManager _userManager;
     private readonly IUserDataManager _userDataManager;
     private readonly InvidiousFeedClient _invidious;
+    private readonly InvidiousArtworkCache _invidiousArtwork;
     private readonly ILogger<ChannelService> _logger;
 
     // Decoded schedules held in memory while a channel is being watched, keyed by channel number. Populated on
@@ -59,8 +60,9 @@ public partial class ChannelService
     /// <param name="userDataManager">The user-data manager, used to read per-item play counts for the Popular channel.</param>
     /// <param name="appPaths">The application paths, used to locate the stream root the schedule cache lives in.</param>
     /// <param name="invidious">The authenticated Invidious subscription-feed client.</param>
+    /// <param name="invidiousArtwork">The local guide-thumbnail cache.</param>
     /// <param name="logger">The logger.</param>
-    public ChannelService(ILibraryManager libraryManager, IMediaSourceManager mediaSourceManager, ISubtitleEncoder subtitleEncoder, IPathManager pathManager, ILocalizationManager localization, IUserManager userManager, IUserDataManager userDataManager, IApplicationPaths appPaths, InvidiousFeedClient invidious, ILogger<ChannelService> logger)
+    public ChannelService(ILibraryManager libraryManager, IMediaSourceManager mediaSourceManager, ISubtitleEncoder subtitleEncoder, IPathManager pathManager, ILocalizationManager localization, IUserManager userManager, IUserDataManager userDataManager, IApplicationPaths appPaths, InvidiousFeedClient invidious, InvidiousArtworkCache invidiousArtwork, ILogger<ChannelService> logger)
     {
         _libraryManager = libraryManager;
         _mediaSourceManager = mediaSourceManager;
@@ -70,6 +72,7 @@ public partial class ChannelService
         _userManager = userManager;
         _userDataManager = userDataManager;
         _invidious = invidious;
+        _invidiousArtwork = invidiousArtwork;
         _scheduleDir = ScheduleDir(appPaths);
         _logger = logger;
     }

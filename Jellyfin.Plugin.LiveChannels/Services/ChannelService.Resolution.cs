@@ -269,25 +269,29 @@ public partial class ChannelService
         {
             var maximum = source.InvidiousMaximumResults <= 0 ? 50 : Math.Min(source.InvidiousMaximumResults, 200);
             var videos = _invidious.GetFeedAsync(source.InvidiousUrl, token, maximum, CancellationToken.None).GetAwaiter().GetResult();
-            return videos
-                .Where(v => !string.IsNullOrWhiteSpace(v.VideoId) && v.LengthSeconds > 0)
-                .Select(v => new ProgramEntry(
-                    StableInvidiousId(v.VideoId),
-                    string.IsNullOrWhiteSpace(v.Author) ? v.Title : v.Author + " - " + v.Title,
+            var entries = new List<ProgramEntry>();
+            foreach (var video in videos.Where(v => !string.IsNullOrWhiteSpace(v.VideoId) && v.LengthSeconds > 0))
+            {
+                var thumbnail = _invidiousArtwork.GetThumbnailAsync(source.InvidiousUrl, video, CancellationToken.None).GetAwaiter().GetResult();
+                entries.Add(new ProgramEntry(
+                    StableInvidiousId(video.VideoId),
+                    string.IsNullOrWhiteSpace(video.Author) ? video.Title : video.Author + " - " + video.Title,
                     null,
-                    TimeSpan.FromSeconds(v.LengthSeconds).Ticks,
-                    v.VideoId)
+                    TimeSpan.FromSeconds(video.LengthSeconds).Ticks,
+                    video.VideoId)
                 {
                     IsInvidious = true,
                     InvidiousUrl = source.InvidiousUrl,
-                    RawName = v.Title,
-                    SeriesName = v.Author,
-                    DateAdded = v.PublishedUtc ?? DateTime.UnixEpoch,
-                    PremiereDate = v.PublishedUtc,
-                    ThumbImagePath = v.VideoThumbnails.OrderByDescending(t => t.Width * t.Height).FirstOrDefault()?.Url,
+                    RawName = video.Title,
+                    SeriesName = video.Author,
+                    DateAdded = video.PublishedUtc ?? DateTime.UnixEpoch,
+                    PremiereDate = video.PublishedUtc,
+                    ThumbImagePath = thumbnail,
                     Genres = InvidiousGenres
-                })
-                .ToList();
+                });
+            }
+
+            return entries;
         }
         catch (Exception ex)
         {

@@ -1,3 +1,4 @@
+using System.IO;
 using System.Net.Http;
 using Jellyfin.Plugin.LiveChannels.Services;
 using JPKribs.Jellyfin.Base;
@@ -19,6 +20,10 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
     public void RegisterServices(IServiceCollection serviceCollection, IServerApplicationHost applicationHost)
     {
         serviceCollection.AddSingleton(_ => new InvidiousFeedClient(new HttpClient()));
+        serviceCollection.AddSingleton(sp => new InvidiousArtworkCache(
+            new HttpClient(),
+            Path.Combine(sp.GetRequiredService<MediaBrowser.Common.Configuration.IApplicationPaths>().CachePath, "livechannels-assets", "invidious"),
+            sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<InvidiousArtworkCache>>()));
         serviceCollection.AddSingleton<ChannelService>();
         serviceCollection.AddSingleton<EncoderResolver>();
         serviceCollection.AddSingleton<StreamSessionService>();
