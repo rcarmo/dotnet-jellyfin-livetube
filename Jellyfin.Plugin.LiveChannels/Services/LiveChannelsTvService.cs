@@ -364,7 +364,7 @@ public sealed class LiveChannelsTvService : ILiveTvService, ISupportsNewTimerIds
             var warmPlaylist = Path.Combine(adopted.Path, "stream.m3u8");
             try
             {
-                await WaitForPlaylistAsync(warmPlaylist, adopted.Worker, cancellationToken).ConfigureAwait(false);
+                await WaitForPlaylistAsync(warmPlaylist, adopted.Worker, FastRemoteStart(channel), cancellationToken).ConfigureAwait(false);
                 _logger.LogInformation("Live Channels: adopted the warm session for {Name}", channel.Name);
                 return (adopted, liveStreamId);
             }
@@ -452,7 +452,7 @@ public sealed class LiveChannelsTvService : ILiveTvService, ISupportsNewTimerIds
         // down if it was the only one) and surface a clear failure rather than handing over an empty session.
         try
         {
-            await WaitForPlaylistAsync(playlist, session.Worker, cancellationToken).ConfigureAwait(false);
+            await WaitForPlaylistAsync(playlist, session.Worker, FastRemoteStart(channel), cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -1482,14 +1482,16 @@ public sealed class LiveChannelsTvService : ILiveTvService, ISupportsNewTimerIds
         };
     }
 
-    private static async Task WaitForPlaylistAsync(string playlist, Task worker, CancellationToken cancellationToken)
+    internal static bool FastRemoteStart(Channel channel)
+        => channel.Sources.Count > 0 && channel.Sources.All(s => s.Kind == SourceKind.InvidiousFeed);
+
+    private static async Task WaitForPlaylistAsync(string playlist, Task worker, bool fastRemoteStart, CancellationToken cancellationToken)
     {
-        // Hand Jellyfin the playlist only once the segmenter has written it and buffered the configured start-up
-        // cushion, so playback starts on content that already exists instead of chasing the encoder (the per-item
-        // path spawns a fresh ffmpeg per item, and these buffered segments ride over the gap between items). The
-        // producer bursts well ahead of realtime, so filling the cushion costs a fraction of its length in real
-        // time, and it keeps filling past this gate while Jellyfin spins up its own repackager.
-        var minSegments = StreamArguments.SegmentsForBuffer(StreamSessionService.BufferSeconds());
+        // Hand Jellyfin the playlist only once playable content exists. Local-library channels retain the full
+        // configured cushion to ride over per-item boundaries. A pure Invidious channel uses explicit seekable
+        // representations and a 30-second producer burst, so one complete segment is enough for immediate
+        // handover; the producer fills the standing reserve while Jellyfin probes and starts its own remux.
+        var minSegments = fastRemoteStart ? 1 : StreamArguments.SegmentsForBuffer(StreamSessionService.BufferSeconds());
         var dir = Path.GetDirectoryName(playlist) ?? string.Empty;
 
         // The deadline scales with the cushion: a deep buffer legitimately takes longer to fill, and a tune-in
