@@ -49,7 +49,7 @@ public sealed class CatchupChannel : IChannel, IDisableMediaSourceDisplay, IRequ
     public string Description => "Restart and seek recent programmes from the virtual Live TV schedule.";
 
     /// <inheritdoc />
-    public string DataVersion => "2";
+    public string DataVersion => "3";
 
     /// <inheritdoc />
     public string HomePageUrl => string.Empty;
