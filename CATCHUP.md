@@ -10,7 +10,9 @@ The `IChannel` provider is named **Live Channels Catch-up VOD**. It exposes:
 - the current programme and completed schedule slots from the last 24 hours;
 - stable item IDs derived from channel ID, slot start and source item ID;
 - guide metadata and cached artwork from `ProgramEntry`;
-- finite `MediaSourceInfo` records resolved at playback time through `IRequiresMediaInfoCallback`.
+- a non-playable listing placeholder whose ID matches the finite `MediaSourceInfo` resolved at playback time through `IRequiresMediaInfoCallback`.
+
+The matching placeholder ID is required by Jellyfin Android TV 0.19.9. The client selects the item DTO's source ID before calling `/PlaybackInfo`; if the item has no plugin source, Jellyfin synthesizes an internal-ID placeholder that cannot match the dynamic callback source and returns `NoCompatibleStream`. Jellyfin filters the plugin placeholder during playback and uses the real local-file or DASH descriptor with the same ID.
 
 Catch-up progress belongs to its projected channel item. Live TV remains an infinite, forward-only stream and does not gain rewind controls.
 

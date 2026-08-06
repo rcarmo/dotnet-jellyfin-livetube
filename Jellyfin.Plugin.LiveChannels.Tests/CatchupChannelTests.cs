@@ -4,6 +4,7 @@ using Jellyfin.Plugin.LiveChannels.Models;
 using Jellyfin.Plugin.LiveChannels.Services;
 using MediaBrowser.Controller.Channels;
 using MediaBrowser.Model.Channels;
+using MediaBrowser.Model.Dto;
 using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.MediaInfo;
 using Xunit;
@@ -33,7 +34,14 @@ public sealed class CatchupChannelTests
         Assert.False(item.IsLiveStream);
         Assert.Equal(program.DurationTicks, item.RunTimeTicks);
         Assert.Equal("/art/thumb.jpg", item.ImageUrl);
-        Assert.Empty(item.MediaSources);
+        var placeholder = Assert.Single(item.MediaSources);
+        Assert.Equal(item.Id, placeholder.Id);
+        Assert.Equal(MediaSourceType.Placeholder, placeholder.Type);
+        Assert.Equal(MediaProtocol.Http, placeholder.Protocol);
+        Assert.StartsWith("livechannels-catchup://", placeholder.Path, StringComparison.Ordinal);
+        Assert.False(placeholder.SupportsDirectPlay);
+        Assert.False(placeholder.SupportsDirectStream);
+        Assert.True(placeholder.SupportsTranscoding);
         var source = CatchupChannel.BuildMediaSource("channel-1", slot, "/media/example.mkv");
         Assert.Equal("/media/example.mkv", source.Path);
         Assert.Equal(MediaProtocol.File, source.Protocol);
@@ -41,6 +49,7 @@ public sealed class CatchupChannelTests
         Assert.Equal(program.DurationTicks, source.RunTimeTicks);
         Assert.True(source.SupportsDirectPlay);
         Assert.True(source.SupportsDirectStream);
+        Assert.Equal(placeholder.Id, source.Id);
     }
 
     [Fact]

@@ -13,7 +13,7 @@ This repository is a maintained fork of [JPKribs/jellyfin-plugin-livechannels](h
 - Guide thumbnails cached locally; signed video and audio representations are resolved at playback time.
 - Finite **Live Channels Catch-up VOD** items for the stock Jellyfin Android TV client.
 - No duplicate media in catch-up: local programmes use their library files; Invidious media is range-proxied on demand. Only a short-lived control MPD is stored.
-- QSV/VA-API and other Jellyfin-configured encoders, fixed-format channel output, HDR tone mapping, subtitle burn-in, DVR recording and session controls.
+- QSV/VA-API and other Jellyfin-configured encoders, fixed-format channel output, HDR tone mapping, subtitle burn-in and session controls.
 
 ## Architecture
 

@@ -52,7 +52,7 @@ public sealed class CatchupChannel : IChannel, IDisableMediaSourceDisplay, IRequ
     public string Description => "Restart and seek recent programmes from the virtual Live TV schedule.";
 
     /// <inheritdoc />
-    public string DataVersion => "3";
+    public string DataVersion => "4";
 
     /// <inheritdoc />
     public string HomePageUrl => string.Empty;
@@ -183,8 +183,13 @@ public sealed class CatchupChannel : IChannel, IDisableMediaSourceDisplay, IRequ
             CommunityRating = program.CommunityRating,
             Genres = program.Genres.ToList(),
             ImageUrl = program.ThumbImagePath ?? program.PrimaryImagePath,
-            MediaSources = new List<MediaSourceInfo>(),
-            Etag = Hash(string.Join('|', "v4", sourceKey, program.DurationTicks.ToString(CultureInfo.InvariantCulture), slot.Start.Ticks.ToString(CultureInfo.InvariantCulture)))
+            // Android TV 0.19.9 selects a source from the item DTO before requesting PlaybackInfo and sends that
+            // source id back to Jellyfin. A channel item with no source is represented by Jellyfin using an
+            // internal-id placeholder; that id cannot match the dynamic source returned by our callback, so
+            // Jellyfin answers NoCompatibleStream. Persist our own placeholder with the dynamic source id instead.
+            // MediaSourceManager removes placeholders before playback and retains the real callback source.
+            MediaSources = new List<MediaSourceInfo> { BuildListingPlaceholder(channelId, slot) },
+            Etag = Hash(string.Join('|', "v5", sourceKey, program.DurationTicks.ToString(CultureInfo.InvariantCulture), slot.Start.Ticks.ToString(CultureInfo.InvariantCulture)))
         };
     }
 
@@ -256,10 +261,29 @@ public sealed class CatchupChannel : IChannel, IDisableMediaSourceDisplay, IRequ
             : !string.IsNullOrEmpty(program.Path) && File.Exists(program.Path)
                 && _libraryManager.GetItemById(program.ItemId)?.IsVisible(user) == true;
 
+    internal static MediaSourceInfo BuildListingPlaceholder(string channelId, ScheduledProgram slot)
+    {
+        var id = ItemId(channelId, slot.Start, slot.Program.ItemId).ToString("N", CultureInfo.InvariantCulture);
+        return new MediaSourceInfo
+        {
+            Id = id,
+            Name = slot.Program.Title,
+            Path = "livechannels-catchup://" + id,
+            Protocol = MediaProtocol.Http,
+            Type = MediaSourceType.Placeholder,
+            RunTimeTicks = slot.Program.DurationTicks,
+            IsInfiniteStream = false,
+            SupportsDirectPlay = false,
+            SupportsDirectStream = false,
+            SupportsTranscoding = true,
+            SupportsProbing = false
+        };
+    }
+
     internal static Guid FolderId(string channelId) => StableId("catchup-folder:" + channelId);
 
     internal static Guid ItemId(string channelId, DateTime start, Guid itemId)
-        => StableId(string.Create(CultureInfo.InvariantCulture, $"catchup-item-v2:{channelId}:{start.Ticks}:{itemId:N}"));
+        => StableId(string.Create(CultureInfo.InvariantCulture, $"catchup-item-v3:{channelId}:{start.Ticks}:{itemId:N}"));
 
     private static ChannelItemResult Result(IEnumerable<ChannelItemInfo> items)
     {

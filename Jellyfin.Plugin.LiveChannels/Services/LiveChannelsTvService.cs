@@ -28,7 +28,7 @@ namespace Jellyfin.Plugin.LiveChannels.Services;
 /// ffmpeg feed segmented to disk and served back through Jellyfin's own internal live stream endpoint (see
 /// <see cref="DirectLiveStream"/>), the same delivery route native tuner streams use.
 /// </summary>
-public sealed class LiveChannelsTvService : ILiveTvService, ISupportsNewTimerIds, ISupportsDirectStreamProvider, IDisposable
+public sealed class LiveChannelsTvService : ILiveTvService, ISupportsDirectStreamProvider, IDisposable
 {
     // Content added within this window is treated as new (not a repeat) in the guide.
     private const int NewWindowDays = 14;
@@ -69,8 +69,6 @@ public sealed class LiveChannelsTvService : ILiveTvService, ISupportsNewTimerIds
     private readonly StreamSessionService _streams;
     private readonly DefaultLogoService _defaultLogo;
     private readonly ActivityLogger _activity;
-    private readonly TimerService _timers;
-    private readonly RecordingService _recordings;
     private readonly StressTestService _stress;
     private readonly ISessionManager _sessionManager;
     private readonly ILogger<LiveChannelsTvService> _logger;
@@ -107,21 +105,17 @@ public sealed class LiveChannelsTvService : ILiveTvService, ISupportsNewTimerIds
     /// <param name="streams">The stream session service, used to produce each channel's ffmpeg feed.</param>
     /// <param name="defaultLogo">The generated fallback-logo service.</param>
     /// <param name="activity">The activity logger, used to record channel start/stop in Jellyfin's activity log.</param>
-    /// <param name="timers">The timer store, backing the DVR timer surface.</param>
-    /// <param name="recordings">The recording service, which fulfils timers by materializing their recordings.</param>
     /// <param name="stress">The stress test, cancelled when a real viewer tunes in.</param>
     /// <param name="sessionManager">The session manager, used by the watchdog to see which live streams clients are actually playing.</param>
     /// <param name="appHost">The application host, used to build the internal live stream endpoint URL each opened source points at.</param>
     /// <param name="appPaths">The application paths, used to default the stream directory under Jellyfin's cache.</param>
     /// <param name="logger">The logger.</param>
-    public LiveChannelsTvService(ChannelService channels, StreamSessionService streams, DefaultLogoService defaultLogo, ActivityLogger activity, TimerService timers, RecordingService recordings, StressTestService stress, ISessionManager sessionManager, IServerApplicationHost appHost, IApplicationPaths appPaths, ILogger<LiveChannelsTvService> logger)
+    public LiveChannelsTvService(ChannelService channels, StreamSessionService streams, DefaultLogoService defaultLogo, ActivityLogger activity, StressTestService stress, ISessionManager sessionManager, IServerApplicationHost appHost, IApplicationPaths appPaths, ILogger<LiveChannelsTvService> logger)
     {
         _channels = channels;
         _streams = streams;
         _defaultLogo = defaultLogo;
         _activity = activity;
-        _timers = timers;
-        _recordings = recordings;
         _stress = stress;
         _sessionManager = sessionManager;
         _logger = logger;
@@ -147,16 +141,11 @@ public sealed class LiveChannelsTvService : ILiveTvService, ISupportsNewTimerIds
         // A fresh process owns no live streams, so anything left in the stream root is an orphan from a previous
         // run that ended without CloseLiveStream (a crash). Sweep it now, then periodically reap sessions whose
         // producer has stopped, or that have run past the configured time limit, but that Jellyfin never closed,
-        // so neither files nor encoders pile up. The same heartbeat drives the DVR: expiring timers get their
-        // recordings materialized and series rules expand into upcoming child timers.
+        // so neither files nor encoders pile up.
         EnsureStreamRootMarker();
         ReapOrphanFiles();
         _reaper = new Timer(
-            _ =>
-            {
-                ReapSessions();
-                _recordings.Kick();
-            },
+            _ => ReapSessions(),
             state: null,
             TimeSpan.FromMinutes(1),
             TimeSpan.FromMinutes(1));
@@ -1308,80 +1297,42 @@ public sealed class LiveChannelsTvService : ILiveTvService, ISupportsNewTimerIds
     /// <inheritdoc />
     public Task ResetTuner(string id, CancellationToken cancellationToken) => Task.CompletedTask;
 
-    // DVR timer surface, backed by TimerService and fulfilled by RecordingService: when a timer's window ends,
-    // the aired program's library file is materialized into the Live TV recordings folder (see
-    // RecordingService for why a recording must be a real file there). Creates route through
-    // ISupportsNewTimerIds so Jellyfin learns the id each new timer was stored under.
+    // ILiveTvService requires timer methods even for tuner-only providers. Returning empty lists keeps this service
+    // out of Jellyfin's scheduled/recorded TV population; mutation calls are rejected rather than silently stored.
 
     /// <inheritdoc />
     public Task<IEnumerable<TimerInfo>> GetTimersAsync(CancellationToken cancellationToken)
-        => Task.FromResult<IEnumerable<TimerInfo>>(_timers.GetTimers());
+        => Task.FromResult(Enumerable.Empty<TimerInfo>());
 
     /// <inheritdoc />
     public Task<IEnumerable<SeriesTimerInfo>> GetSeriesTimersAsync(CancellationToken cancellationToken)
-        => Task.FromResult<IEnumerable<SeriesTimerInfo>>(_timers.GetSeriesTimers());
+        => Task.FromResult(Enumerable.Empty<SeriesTimerInfo>());
 
     /// <inheritdoc />
     public Task<SeriesTimerInfo> GetNewTimerDefaultsAsync(CancellationToken cancellationToken, ProgramInfo? program = null)
-        => Task.FromResult(TimerService.NewTimerDefaults(program));
+        => Task.FromResult(new SeriesTimerInfo());
 
     /// <inheritdoc />
     public Task CreateTimerAsync(TimerInfo info, CancellationToken cancellationToken)
-    {
-        _timers.SaveTimer(info);
-        return Task.CompletedTask;
-    }
+        => Task.FromException(new NotSupportedException("Live Channels recording is disabled; use Catch-up VOD."));
 
     /// <inheritdoc />
     public Task CreateSeriesTimerAsync(SeriesTimerInfo info, CancellationToken cancellationToken)
-    {
-        _timers.SaveSeriesTimer(info);
-
-        // Expand the rule into its child timers right away (not just on the next heartbeat), so the client
-        // that created it sees the scheduled airings on its very next timers fetch.
-        _recordings.Kick();
-        return Task.CompletedTask;
-    }
-
-    /// <inheritdoc />
-    Task<string> ISupportsNewTimerIds.CreateTimer(TimerInfo info, CancellationToken cancellationToken)
-        => Task.FromResult(_timers.SaveTimer(info));
-
-    /// <inheritdoc />
-    Task<string> ISupportsNewTimerIds.CreateSeriesTimer(SeriesTimerInfo info, CancellationToken cancellationToken)
-    {
-        var id = _timers.SaveSeriesTimer(info);
-        _recordings.Kick();
-        return Task.FromResult(id);
-    }
+        => Task.FromException(new NotSupportedException("Live Channels recording is disabled; use Catch-up VOD."));
 
     /// <inheritdoc />
     public Task UpdateTimerAsync(TimerInfo updatedTimer, CancellationToken cancellationToken)
-    {
-        _timers.SaveTimer(updatedTimer);
-        return Task.CompletedTask;
-    }
+        => Task.FromException(new NotSupportedException("Live Channels recording is disabled; use Catch-up VOD."));
 
     /// <inheritdoc />
     public Task UpdateSeriesTimerAsync(SeriesTimerInfo info, CancellationToken cancellationToken)
-    {
-        _timers.SaveSeriesTimer(info);
-        return Task.CompletedTask;
-    }
+        => Task.FromException(new NotSupportedException("Live Channels recording is disabled; use Catch-up VOD."));
 
     /// <inheritdoc />
-    public Task CancelTimerAsync(string timerId, CancellationToken cancellationToken)
-    {
-        _timers.CancelTimer(timerId);
-        return Task.CompletedTask;
-    }
+    public Task CancelTimerAsync(string timerId, CancellationToken cancellationToken) => Task.CompletedTask;
 
     /// <inheritdoc />
-    public Task CancelSeriesTimerAsync(string timerId, CancellationToken cancellationToken)
-    {
-        _timers.CancelSeriesTimer(timerId);
-        return Task.CompletedTask;
-    }
+    public Task CancelSeriesTimerAsync(string timerId, CancellationToken cancellationToken) => Task.CompletedTask;
 
     // Builds the "menu" source descriptor Jellyfin lists before a stream is opened. We produce the stream
     // ourselves at a known resolution/codec, so it advertises concrete video/audio streams: it cannot be probed

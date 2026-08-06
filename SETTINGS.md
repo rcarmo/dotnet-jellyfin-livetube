@@ -19,7 +19,6 @@ Everything the plugin can be told to do, tab by tab. The configuration lives at 
   * [Subtitle appearance](#subtitle-appearance)
   * [Sessions](#sessions)
   * [Troubleshooting](#troubleshooting)
-* [Recording (DVR)](#recording-dvr)
 
 ---
 
@@ -193,9 +192,3 @@ How burned-in subtitles look, wherever a channel burns them. Leave everything un
 **Stress test.** Measures how many concurrent streams the server can sustain, using the real channel pipeline. Pick one demanding movie or episode (4K or HDR gives the most honest number), then each round encodes a minute of it with one more simultaneous stream than the last, until a stream drops below realtime. The last fully passing round is the recommendation, with an **Apply** link that fills in Maximum concurrent streams for you. The test refuses to start while channel streams are active, and a viewer tuning in cancels it, since a real viewer always wins the encoder. Nothing about the test is saved.
 
 **Reset schedule.** Rebuilds every channel schedule and guide from the current settings by running Jellyfin's own Refresh Guide task. Use it to clear a stale schedule, like after changing a channel's filters.
-
----
-
-## Recording (DVR)
-
-There are no plugin settings for recording. Timers and series recordings created from the guide work like the built-in DVR: when a program's air window ends, its library file is materialized (hardlinked on the same volume, copied otherwise) into Jellyfin's Live TV recording folders, honouring the recording paths configured at **Dashboard → Live TV → DVR**.
