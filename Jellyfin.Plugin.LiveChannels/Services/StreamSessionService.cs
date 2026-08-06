@@ -524,31 +524,28 @@ public class StreamSessionService
         }
 
         var input = program.Path;
-        string? filteredManifest = null;
+        string? originalAudioInput = null;
+        var sourceHeight = program.SourceHeight;
         if (program.IsInvidious)
         {
             try
             {
-                filteredManifest = Path.Combine(Path.GetTempPath(), "livechannels-" + program.Path + "-" + Guid.NewGuid().ToString("N") + ".mpd");
-                var language = await _invidious.WriteOriginalAudioDashManifestAsync(
+                var media = await _invidious.ResolveOriginalPlaybackMediaAsync(
                     program.InvidiousUrl ?? string.Empty,
                     program.Path,
-                    filteredManifest,
                     cancellationToken).ConfigureAwait(false);
-                input = filteredManifest;
+                input = media.VideoUrl;
+                originalAudioInput = media.AudioUrl;
+                sourceHeight = media.VideoHeight;
                 _logger.LogInformation(
-                    "Live Channels: remote video {VideoId} resolved to original audio {Language}",
+                    "Live Channels: remote video {VideoId} resolved to original audio {Language} and {Height}p H.264 video",
                     program.Path,
-                    string.IsNullOrWhiteSpace(language) ? "(unlabelled)" : language);
+                    string.IsNullOrWhiteSpace(media.AudioLanguage) ? "(unlabelled)" : media.AudioLanguage,
+                    media.VideoHeight);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                if (filteredManifest is not null)
-                {
-                    TryDeleteFile(filteredManifest);
-                }
-
-                _logger.LogWarning(ex, "Live Channels: refusing remote video {VideoId} because its original audio could not be selected", program.Path);
+                _logger.LogWarning(ex, "Live Channels: refusing remote video {VideoId} because its original media could not be selected", program.Path);
                 return (false, -1);
             }
         }
@@ -596,29 +593,26 @@ public class StreamSessionService
             }
         }
 
-        long total;
-        double lastOut;
-        int exitCode;
-        try
+        var (args, hardwareDecode) = BuildArguments(input, inputOffset, timeline, subtitle, sourceHeight, subtitlePath, softwareDecode: false, program.IsHdr, program.DefaultAudioOrdinal, burstSeconds(), inputDurationLimit, subtitleFonts);
+        if (originalAudioInput is not null)
         {
-            var (args, hardwareDecode) = BuildArguments(input, inputOffset, timeline, subtitle, program.SourceHeight, subtitlePath, softwareDecode: false, program.IsHdr, program.DefaultAudioOrdinal, burstSeconds(), inputDurationLimit, subtitleFonts);
-            (total, lastOut, exitCode) = await RunFfmpegAsync(ffmpeg, args, program.Title, output, cancellationToken, stats).ConfigureAwait(false);
-
-            // The per-item path has no continuous decoder to fall back, so retry a hardware-decode that produced
-            // nothing (e.g. a codec the GPU can't decode) once in software, so one bad item can't blank the channel.
-            if (total == 0 && hardwareDecode && !cancellationToken.IsCancellationRequested)
-            {
-                _logger.LogWarning("Channel {Name}: hardware decode produced no output for \"{Title}\"; retrying in software", channel.Name, program.Title);
-                var (swArgs, _) = BuildArguments(input, inputOffset, timeline, subtitle, program.SourceHeight, subtitlePath, softwareDecode: true, program.IsHdr, program.DefaultAudioOrdinal, burstSeconds(), inputDurationLimit, subtitleFonts);
-                (total, lastOut, exitCode) = await RunFfmpegAsync(ffmpeg, swArgs, program.Title, output, cancellationToken, stats).ConfigureAwait(false);
-            }
+            AddOriginalAudioInput(args, originalAudioInput);
         }
-        finally
+
+        var (total, lastOut, exitCode) = await RunFfmpegAsync(ffmpeg, args, program.Title, output, cancellationToken, stats).ConfigureAwait(false);
+
+        // The per-item path has no continuous decoder to fall back, so retry a hardware-decode that produced
+        // nothing (e.g. a codec the GPU can't decode) once in software, so one bad item can't blank the channel.
+        if (total == 0 && hardwareDecode && !cancellationToken.IsCancellationRequested)
         {
-            if (filteredManifest is not null)
+            _logger.LogWarning("Channel {Name}: hardware decode produced no output for \"{Title}\"; retrying in software", channel.Name, program.Title);
+            var (swArgs, _) = BuildArguments(input, inputOffset, timeline, subtitle, sourceHeight, subtitlePath, softwareDecode: true, program.IsHdr, program.DefaultAudioOrdinal, burstSeconds(), inputDurationLimit, subtitleFonts);
+            if (originalAudioInput is not null)
             {
-                TryDeleteFile(filteredManifest);
+                AddOriginalAudioInput(swArgs, originalAudioInput);
             }
+
+            (total, lastOut, exitCode) = await RunFfmpegAsync(ffmpeg, swArgs, program.Title, output, cancellationToken, stats).ConfigureAwait(false);
         }
 
         // A clean (exit 0), uncancelled run of a WHOLE item (no tune-in seek) reveals the item's true
@@ -639,16 +633,26 @@ public class StreamSessionService
         return (total > 0, lastOut);
     }
 
-    private static void TryDeleteFile(string path)
+    internal static void AddOriginalAudioInput(List<string> args, string audioUrl)
     {
-        try
+        var outputOption = args.FindIndex(a => a is "-vf" or "-filter_complex" or "-map");
+        if (outputOption < 0)
         {
-            File.Delete(path);
+            throw new InvalidOperationException("Could not locate ffmpeg output options.");
         }
-        catch
+
+        args.Insert(outputOption, audioUrl);
+        args.Insert(outputOption, "-i");
+        for (var i = 0; i < args.Count - 1; i++)
         {
-            // Best effort: the OS temporary directory is cleaned independently.
+            if (args[i] == "-map" && args[i + 1].StartsWith("0:a:", StringComparison.Ordinal))
+            {
+                args[i + 1] = "1:a:0?";
+                return;
+            }
         }
+
+        throw new InvalidOperationException("Could not locate ffmpeg audio mapping.");
     }
 
     // Streams a standby slate (colour bars + silence), looped, until the client disconnects. Shown when a

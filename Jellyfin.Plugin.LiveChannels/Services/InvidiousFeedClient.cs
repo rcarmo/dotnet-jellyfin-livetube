@@ -13,6 +13,9 @@ using Jellyfin.Plugin.LiveChannels.Models;
 
 namespace Jellyfin.Plugin.LiveChannels.Services;
 
+/// <summary>The exact media representations selected for one Invidious video.</summary>
+public sealed record InvidiousPlaybackMedia(string VideoUrl, string AudioUrl, string? AudioLanguage, int VideoHeight);
+
 /// <summary>Reads one Invidious account's authenticated subscription feed.</summary>
 public sealed class InvidiousFeedClient
 {
@@ -77,6 +80,42 @@ public sealed class InvidiousFeedClient
         return new Uri(root, "api/manifest/dash/id/" + Uri.EscapeDataString(videoId.Trim()) + "?local=true").ToString();
     }
 
+    /// <summary>Resolves one explicit video representation and the original audio representation.</summary>
+    public async Task<InvidiousPlaybackMedia> ResolveOriginalPlaybackMediaAsync(
+        string instanceUrl,
+        string videoId,
+        CancellationToken cancellationToken)
+    {
+        var manifestUrl = BuildDashUrl(instanceUrl, videoId);
+        using var response = await _httpClient.GetAsync(manifestUrl, cancellationToken).ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+        var xml = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        var document = XDocument.Parse(xml);
+        var ns = document.Root?.Name.Namespace ?? XNamespace.None;
+        var audioSets = document.Descendants(ns + "AdaptationSet").Where(IsAudioAdaptation).ToList();
+        var original = SelectOriginalAudio(audioSets, ns);
+        var baseUri = response.RequestMessage?.RequestUri ?? new Uri(manifestUrl);
+        var audioUrl = ResolveBaseUrl(original.Descendants(ns + "BaseURL").FirstOrDefault(), baseUri, "original audio");
+
+        var video = document.Descendants(ns + "AdaptationSet")
+            .Where(a => !IsAudioAdaptation(a))
+            .SelectMany(a => a.Elements(ns + "Representation"))
+            .Where(r => ((string?)r.Attribute("codecs"))?.StartsWith("avc1", StringComparison.OrdinalIgnoreCase) == true)
+            .Select(r => new
+            {
+                Element = r,
+                Height = (int?)r.Attribute("height") ?? 0,
+                Bandwidth = (long?)r.Attribute("bandwidth") ?? 0
+            })
+            .Where(r => r.Height is > 0 and <= 1080)
+            .OrderByDescending(r => r.Height)
+            .ThenByDescending(r => r.Bandwidth)
+            .FirstOrDefault()
+            ?? throw new InvalidDataException("Invidious DASH manifest has no H.264 video representation up to 1080p.");
+        var videoUrl = ResolveBaseUrl(video.Element.Element(ns + "BaseURL"), baseUri, "video");
+        return new InvidiousPlaybackMedia(videoUrl, audioUrl, (string?)original.Attribute("lang"), video.Height);
+    }
+
     /// <summary>
     /// Downloads a video's DASH manifest and writes a playback manifest containing only its explicitly marked
     /// original audio adaptation set. YouTube places auto-dubbed tracks before the original in some manifests;
@@ -107,16 +146,7 @@ public sealed class InvidiousFeedClient
             throw new InvalidDataException("Invidious DASH manifest has no audio adaptation set.");
         }
 
-        var original = audioSets
-            .Where(a => HasRole(a, ns, "main") && !HasRole(a, ns, "enhanced-audio-intelligibility"))
-            .FirstOrDefault()
-            ?? audioSets.FirstOrDefault(a => HasRole(a, ns, "main"))
-            ?? audioSets.Where(a => !HasRole(a, ns, "alternate") && !HasRole(a, ns, "dub")).SingleOrDefault()
-            ?? (audioSets.Count == 1 ? audioSets[0] : null);
-        if (original is null)
-        {
-            throw new InvalidDataException("Invidious DASH manifest does not identify one original audio track.");
-        }
+        var original = SelectOriginalAudio(audioSets, ns);
 
         foreach (var alternate in audioSets.Where(a => !ReferenceEquals(a, original)).ToList())
         {
@@ -130,7 +160,10 @@ public sealed class InvidiousFeedClient
         {
             if (Uri.TryCreate(baseUri, baseUrl.Value.Trim(), out var absolute))
             {
-                baseUrl.Value = absolute.ToString();
+                // ffmpeg's DASH XML reader does not preserve entity-decoded ampersands in a local MPD's
+                // BaseURL query string ("?a=1&amp;b=2" became "?a=1b=2", invalidating YouTube's signature).
+                // CDATA carries the signed URL byte-for-byte while remaining valid XML.
+                baseUrl.ReplaceNodes(new XCData(absolute.ToString()));
             }
         }
 
@@ -138,6 +171,24 @@ public sealed class InvidiousFeedClient
         await document.SaveAsync(destination, SaveOptions.DisableFormatting, cancellationToken).ConfigureAwait(false);
         await destination.FlushAsync(cancellationToken).ConfigureAwait(false);
         return (string?)original.Attribute("lang");
+    }
+
+    private static XElement SelectOriginalAudio(List<XElement> audioSets, XNamespace ns)
+        => audioSets
+            .FirstOrDefault(a => HasRole(a, ns, "main") && !HasRole(a, ns, "enhanced-audio-intelligibility"))
+            ?? audioSets.FirstOrDefault(a => HasRole(a, ns, "main"))
+            ?? audioSets.Where(a => !HasRole(a, ns, "alternate") && !HasRole(a, ns, "dub")).SingleOrDefault()
+            ?? (audioSets.Count == 1 ? audioSets[0] : null)
+            ?? throw new InvalidDataException("Invidious DASH manifest does not identify one original audio track.");
+
+    private static string ResolveBaseUrl(XElement? element, Uri baseUri, string kind)
+    {
+        if (element is null || !Uri.TryCreate(baseUri, element.Value.Trim(), out var absolute))
+        {
+            throw new InvalidDataException("Invidious DASH manifest has no valid " + kind + " URL.");
+        }
+
+        return absolute.ToString();
     }
 
     private static bool IsAudioAdaptation(XElement adaptation)

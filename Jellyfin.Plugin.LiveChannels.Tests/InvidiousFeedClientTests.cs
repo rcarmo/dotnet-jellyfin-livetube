@@ -71,6 +71,33 @@ public class InvidiousFeedClientTests
     }
 
     [Fact]
+    public async Task ResolveOriginalPlaybackMediaAsync_SelectsMainAudioAndBestH264Video()
+    {
+        const string mpd = """
+            <MPD xmlns="urn:mpeg:dash:schema:mpd:2011"><Period>
+              <AdaptationSet contentType="audio" lang="hi"><Role value="dub" /><Representation><BaseURL>/dub.m4a?a=1&amp;b=2</BaseURL></Representation></AdaptationSet>
+              <AdaptationSet contentType="audio" lang="en-US"><Role value="main" /><Representation><BaseURL>/original.m4a?a=1&amp;b=2</BaseURL></Representation></AdaptationSet>
+              <AdaptationSet contentType="video">
+                <Representation codecs="vp09" height="2160" bandwidth="9000"><BaseURL>/vp9.webm</BaseURL></Representation>
+                <Representation codecs="avc1.640028" height="1080" bandwidth="5000"><BaseURL>/1080.mp4</BaseURL></Representation>
+                <Representation codecs="avc1.4d401f" height="720" bandwidth="3000"><BaseURL>/720.mp4</BaseURL></Representation>
+              </AdaptationSet>
+            </Period></MPD>
+            """;
+        var client = new InvidiousFeedClient(new HttpClient(new StubHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(mpd)
+        }))));
+
+        var media = await client.ResolveOriginalPlaybackMediaAsync("http://invidious.test", "abc123", CancellationToken.None);
+
+        Assert.Equal("en-US", media.AudioLanguage);
+        Assert.Equal("http://invidious.test/original.m4a?a=1&b=2", media.AudioUrl);
+        Assert.Equal("http://invidious.test/1080.mp4", media.VideoUrl);
+        Assert.Equal(1080, media.VideoHeight);
+    }
+
+    [Fact]
     public async Task WriteOriginalAudioDashManifestAsync_RemovesDubsAndKeepsMainAudio()
     {
         const string mpd = """
@@ -106,7 +133,9 @@ public class InvidiousFeedClientTests
             Assert.Equal("en-US", language);
             Assert.Single(audio);
             Assert.Equal("en-US", (string?)audio[0].Attribute("lang"));
-            Assert.Equal("http://invidious.test/original.m4a", audio[0].Descendants(ns + "BaseURL").Single().Value);
+            var audioBaseUrl = audio[0].Descendants(ns + "BaseURL").Single();
+            Assert.Equal("http://invidious.test/original.m4a", audioBaseUrl.Value);
+            Assert.IsType<XCData>(audioBaseUrl.FirstNode);
             Assert.Equal("http://invidious.test/video.mp4", document.Descendants(ns + "AdaptationSet").Single(e => (string?)e.Attribute("contentType") == "video").Descendants(ns + "BaseURL").Single().Value);
         }
         finally

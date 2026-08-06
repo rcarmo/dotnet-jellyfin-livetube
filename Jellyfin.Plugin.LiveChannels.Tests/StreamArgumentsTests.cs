@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Jellyfin.Plugin.LiveChannels.Models;
+using Jellyfin.Plugin.LiveChannels.Services;
 using Jellyfin.Plugin.LiveChannels.Utilities;
 using Xunit;
 
@@ -44,6 +45,20 @@ public class StreamArgumentsTests
         Assert.True(whitelist >= 0);
         Assert.Equal("file,http,https,tcp,tls,crypto,data", a[whitelist + 1]);
         Assert.True(whitelist < a.IndexOf("-i"));
+    }
+
+    [Fact]
+    public void OriginalAudioInput_MapsTheSeparateAudioRepresentation()
+    {
+        var a = StreamArguments.Build("https://media.test/video.mp4", default, default, 1280, 4000, SoftwareH264, "aac", 192, null);
+
+        StreamSessionService.AddOriginalAudioInput(a, "https://media.test/original.m4a?a=1&b=2");
+
+        var audioInput = a.IndexOf("https://media.test/original.m4a?a=1&b=2");
+        Assert.True(audioInput > 0);
+        Assert.Equal("-i", a[audioInput - 1]);
+        Assert.Contains("1:a:0?", a);
+        Assert.DoesNotContain("0:a:0?", a);
     }
 
     [Fact]
