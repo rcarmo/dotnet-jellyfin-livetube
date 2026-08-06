@@ -134,7 +134,8 @@ public sealed class CatchupChannel : IChannel, IDisableMediaSourceDisplay
         var path = program.Path ?? throw new ArgumentException("A local catch-up programme needs a media path.", nameof(slot));
         var source = new MediaSourceInfo
         {
-            Id = program.ItemId.ToString("N", CultureInfo.InvariantCulture) + "_" + slot.Start.Ticks.ToString(CultureInfo.InvariantCulture),
+            // Jellyfin's HLS controller parses MediaSourceId as a GUID for channel items.
+            Id = ItemId(channelId, slot.Start, program.ItemId).ToString("N", CultureInfo.InvariantCulture),
             Name = program.Title,
             Path = path,
             Protocol = MediaProtocol.File,
