@@ -115,9 +115,7 @@ public sealed class CatchupChannel : IChannel, IDisableMediaSourceDisplay, IRequ
         var now = DateTime.UtcNow;
         var programmes = _channels.ResolvePrograms(channel);
         var timeline = _channels.BuildTimeline(channel, programmes, now - History, now.AddSeconds(1));
-        var items = timeline
-            .Where(slot => slot.Start <= now && IsVisible(slot.Program, user))
-            .OrderByDescending(slot => slot.Start)
+        var items = SelectVisibleSlots(timeline, now, program => IsVisible(program, user))
             .Select(slot => BuildItem(channel.Id, slot))
             .ToList();
         return Task.FromResult(Result(items));
@@ -263,6 +261,29 @@ public sealed class CatchupChannel : IChannel, IDisableMediaSourceDisplay, IRequ
             ? !string.IsNullOrEmpty(program.Path) && !string.IsNullOrEmpty(program.InvidiousUrl)
             : !string.IsNullOrEmpty(program.Path) && File.Exists(program.Path)
                 && _libraryManager.GetItemById(program.ItemId)?.IsVisible(user) == true;
+
+    internal static IReadOnlyList<ScheduledProgram> SelectVisibleSlots(
+        IEnumerable<ScheduledProgram> timeline,
+        DateTime now,
+        Func<ProgramEntry, bool> isVisible)
+    {
+        ArgumentNullException.ThrowIfNull(timeline);
+        ArgumentNullException.ThrowIfNull(isVisible);
+        var visible = timeline.Where(slot => slot.Start <= now && isVisible(slot.Program)).ToList();
+
+        // Local catch-up is airing history, so repeated broadcasts remain separate. Invidious VOD is a retained
+        // source catalogue: a short source loop can air the same video several times in 24 hours, and Android TV
+        // displays the shared publication date rather than each slot start. Keep only the latest airing for each
+        // stable video id, preserving distinct videos even when their titles happen to match.
+        return visible
+            .Where(slot => !slot.Program.IsInvidious)
+            .Concat(visible
+                .Where(slot => slot.Program.IsInvidious)
+                .GroupBy(slot => slot.Program.ItemId)
+                .Select(group => group.OrderByDescending(slot => slot.Start).First()))
+            .OrderByDescending(slot => slot.Start)
+            .ToList();
+    }
 
     internal static MediaSourceInfo BuildListingPlaceholder(string channelId, ScheduledProgram slot)
     {

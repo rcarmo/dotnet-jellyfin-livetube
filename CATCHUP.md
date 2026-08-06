@@ -7,7 +7,8 @@ The plugin exposes recent schedule slots as finite Jellyfin video items. Stock J
 The `IChannel` provider is named **Live Channels Catch-up VOD**. It exposes:
 
 - one folder per enabled virtual channel;
-- the current programme and completed schedule slots from the last 24 hours;
+- the current programme and completed local-media schedule slots from the last 24 hours;
+- one Invidious VOD item per stable source video, using its latest airing in that window so a short loop does not create duplicate cards;
 - stable item IDs derived from channel ID, slot start and source item ID;
 - guide metadata and cached artwork from `ProgramEntry`;
 - a non-playable listing placeholder whose ID matches the finite `MediaSourceInfo` resolved at playback time through `IRequiresMediaInfoCallback`.

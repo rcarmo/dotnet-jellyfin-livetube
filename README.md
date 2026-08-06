@@ -29,7 +29,7 @@ Invidious feed ───┘                         │
 
 Live TV remains a forward-only linear stream. `DirectLiveStream` serves a rolling MPEG-TS window through Jellyfin's own live-stream endpoint. Android TV correctly disables seeking for this infinite Live TV source.
 
-Catch-up is a separate `IChannel` provider. It projects the last 24 hours of schedule slots as finite ordinary video items, which enables the stock Android TV client's pause, seek, rewind, fast-forward and resume controls.
+Catch-up is a separate `IChannel` provider. It projects the last 24 hours of local schedule slots as finite ordinary videos and exposes each Invidious source video only once using its latest airing, which prevents short YouTube loops from producing duplicate Android TV cards. The stock client gains pause, seek, rewind, fast-forward and resume controls.
 
 For Invidious catch-up, the plugin:
 

@@ -92,6 +92,31 @@ public sealed class CatchupChannelTests
     }
 
     [Fact]
+    public void SelectVisibleSlots_DeduplicatesInvidiousSources_ButKeepsLocalAirings()
+    {
+        var first = new ProgramEntry(Guid.Parse("11111111-2222-3333-4444-555555555555"), "Remote", null, TimeSpan.FromMinutes(10).Ticks, "video-id") { IsInvidious = true };
+        var sameTitleDifferentVideo = new ProgramEntry(Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"), "Remote", null, TimeSpan.FromMinutes(10).Ticks, "other-video") { IsInvidious = true };
+        var local = new ProgramEntry(Guid.Parse("99999999-8888-7777-6666-555555555555"), "Local", null, TimeSpan.FromMinutes(10).Ticks, "/media/local.mkv");
+        var timeline = new[]
+        {
+            new ScheduledProgram(first, DateTime.UnixEpoch, DateTime.UnixEpoch.AddMinutes(10)),
+            new ScheduledProgram(local, DateTime.UnixEpoch.AddMinutes(10), DateTime.UnixEpoch.AddMinutes(20)),
+            new ScheduledProgram(first, DateTime.UnixEpoch.AddMinutes(20), DateTime.UnixEpoch.AddMinutes(30)),
+            new ScheduledProgram(local, DateTime.UnixEpoch.AddMinutes(30), DateTime.UnixEpoch.AddMinutes(40)),
+            new ScheduledProgram(sameTitleDifferentVideo, DateTime.UnixEpoch.AddMinutes(40), DateTime.UnixEpoch.AddMinutes(50))
+        };
+
+        var selected = CatchupChannel.SelectVisibleSlots(timeline, DateTime.UnixEpoch.AddHours(1), _ => true);
+
+        Assert.Equal(4, selected.Count);
+        Assert.Equal(sameTitleDifferentVideo.ItemId, selected[0].Program.ItemId);
+        Assert.Equal(local.ItemId, selected[1].Program.ItemId);
+        Assert.Equal(first.ItemId, selected[2].Program.ItemId);
+        Assert.Equal(DateTime.UnixEpoch.AddMinutes(20), selected[2].Start);
+        Assert.Equal(local.ItemId, selected[3].Program.ItemId);
+    }
+
+    [Fact]
     public void StableIds_SeparateFoldersAndAirings()
     {
         var item = Guid.Parse("11111111-2222-3333-4444-555555555555");
