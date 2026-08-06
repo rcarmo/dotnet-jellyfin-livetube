@@ -44,6 +44,45 @@ public sealed class CatchupChannelTests
     }
 
     [Fact]
+    public void BuildInvidiousMediaSource_DeclaresRemoteManifestStreams()
+    {
+        var start = new DateTime(2026, 8, 6, 14, 0, 0, DateTimeKind.Utc);
+        var program = new ProgramEntry(Guid.Parse("11111111-2222-3333-4444-555555555555"), "Remote", "Overview", TimeSpan.FromMinutes(12).Ticks, "video-id")
+        {
+            IsInvidious = true,
+            InvidiousUrl = "http://invidious.test"
+        };
+        var slot = new ScheduledProgram(program, start, start.AddMinutes(12));
+
+        var source = CatchupChannel.BuildInvidiousMediaSource(
+            "channel-80",
+            slot,
+            new InvidiousCatchupManifestResult("/cache/video-id.mpd", "en-US", 1080));
+
+        Assert.Equal("mpd", source.Container);
+        Assert.False(source.IsInfiniteStream);
+        Assert.False(source.SupportsProbing);
+        Assert.False(source.SupportsDirectPlay);
+        Assert.False(source.SupportsDirectStream);
+        Assert.Collection(
+            source.MediaStreams,
+            video =>
+            {
+                Assert.Equal(MediaStreamType.Video, video.Type);
+                Assert.Equal("h264", video.Codec);
+                Assert.Equal(1920, video.Width);
+                Assert.Equal(1080, video.Height);
+            },
+            audio =>
+            {
+                Assert.Equal(MediaStreamType.Audio, audio.Type);
+                Assert.Equal("aac", audio.Codec);
+                Assert.Equal("en-US", audio.Language);
+                Assert.True(audio.IsDefault);
+            });
+    }
+
+    [Fact]
     public void StableIds_SeparateFoldersAndAirings()
     {
         var item = Guid.Parse("11111111-2222-3333-4444-555555555555");

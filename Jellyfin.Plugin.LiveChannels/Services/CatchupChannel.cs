@@ -142,8 +142,8 @@ public sealed class CatchupChannel : IChannel, IDisableMediaSourceDisplay, IRequ
 
             if (slot.Program.IsInvidious && !string.IsNullOrEmpty(slot.Program.Path) && !string.IsNullOrEmpty(slot.Program.InvidiousUrl))
             {
-                var path = await _invidiousManifest.GetAsync(slot.Program.InvidiousUrl, slot.Program.Path, cancellationToken).ConfigureAwait(false);
-                return new[] { BuildMediaSource(channel.Id, slot, path) };
+                var manifest = await _invidiousManifest.GetAsync(slot.Program.InvidiousUrl, slot.Program.Path, cancellationToken).ConfigureAwait(false);
+                return new[] { BuildInvidiousMediaSource(channel.Id, slot, manifest) };
             }
         }
 
@@ -205,6 +205,42 @@ public sealed class CatchupChannel : IChannel, IDisableMediaSourceDisplay, IRequ
             SupportsProbing = true,
             Container = Path.GetExtension(path).TrimStart('.')
         };
+    }
+
+    internal static MediaSourceInfo BuildInvidiousMediaSource(string channelId, ScheduledProgram slot, InvidiousCatchupManifestResult manifest)
+    {
+        ArgumentNullException.ThrowIfNull(manifest);
+        var source = BuildMediaSource(channelId, slot, manifest.Path);
+        var width = (int)Math.Round(manifest.VideoHeight * 16.0 / 9.0);
+        source.SupportsDirectPlay = false;
+        source.SupportsDirectStream = false;
+        source.SupportsProbing = false;
+        source.MediaStreams = new List<MediaStream>
+        {
+            new()
+            {
+                Type = MediaStreamType.Video,
+                Index = 0,
+                Codec = "h264",
+                Width = width,
+                Height = manifest.VideoHeight,
+                RealFrameRate = 30,
+                AverageFrameRate = 30,
+                IsInterlaced = false,
+                PixelFormat = "yuv420p"
+            },
+            new()
+            {
+                Type = MediaStreamType.Audio,
+                Index = 1,
+                Codec = "aac",
+                Channels = 2,
+                SampleRate = 48000,
+                Language = manifest.AudioLanguage,
+                IsDefault = true
+            }
+        };
+        return source;
     }
 
     private bool IsVisible(ProgramEntry program, Jellyfin.Database.Implementations.Entities.User user)

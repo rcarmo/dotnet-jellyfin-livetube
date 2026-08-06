@@ -9,6 +9,9 @@ using MediaBrowser.Common.Configuration;
 
 namespace Jellyfin.Plugin.LiveChannels.Services;
 
+/// <summary>A local control manifest plus the concrete stream metadata Jellyfin needs before transcoding.</summary>
+public sealed record InvidiousCatchupManifestResult(string Path, string? AudioLanguage, int VideoHeight);
+
 /// <summary>Writes short-lived local DASH control manifests for remote Invidious catch-up playback.</summary>
 public sealed class InvidiousCatchupManifest
 {
@@ -31,7 +34,7 @@ public sealed class InvidiousCatchupManifest
     /// Returns a fresh local MPD that references remote video and original-audio representations. The MPD contains
     /// no media payload and is replaced before its signed representation URLs become stale.
     /// </summary>
-    public async Task<string> GetAsync(string instanceUrl, string videoId, CancellationToken cancellationToken)
+    public async Task<InvidiousCatchupManifestResult> GetAsync(string instanceUrl, string videoId, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(instanceUrl);
         var key = SanitizeVideoId(videoId);
@@ -41,9 +44,10 @@ public sealed class InvidiousCatchupManifest
         {
             Directory.CreateDirectory(_root);
             var destination = Path.Combine(_root, key + ".mpd");
+            var media = await _invidious.ResolveOriginalPlaybackMediaAsync(instanceUrl, videoId, cancellationToken).ConfigureAwait(false);
             if (File.Exists(destination) && DateTime.UtcNow - File.GetLastWriteTimeUtc(destination) < MaximumAge)
             {
-                return destination;
+                return new InvidiousCatchupManifestResult(destination, media.AudioLanguage, media.VideoHeight);
             }
 
             var temporary = destination + "." + Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture) + ".tmp";
@@ -57,7 +61,7 @@ public sealed class InvidiousCatchupManifest
 
                 File.Move(temporary, destination, overwrite: true);
                 Cleanup(_root, CleanupAge, destination);
-                return destination;
+                return new InvidiousCatchupManifestResult(destination, media.AudioLanguage, media.VideoHeight);
             }
             finally
             {
