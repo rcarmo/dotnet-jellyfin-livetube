@@ -1,4 +1,4 @@
-# Live Channels — rcarmo fork
+# Jellyfin LiveTube
 
 This Jellyfin 10.11.x plugin provides looping virtual TV channels from your media library or YouTube (via  authenticated Invidious subscription channels), and an Android-compatible catch-up catalogue. It runs inside Jellyfin, so no external tuner service or client modification is required.
 
