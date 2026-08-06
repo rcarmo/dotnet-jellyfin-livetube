@@ -177,7 +177,7 @@ public sealed class CatchupChannel : IChannel, IDisableMediaSourceDisplay
     internal static Guid FolderId(string channelId) => StableId("catchup-folder:" + channelId);
 
     internal static Guid ItemId(string channelId, DateTime start, Guid itemId)
-        => StableId(string.Create(CultureInfo.InvariantCulture, $"catchup-item:{channelId}:{start.Ticks}:{itemId:N}"));
+        => StableId(string.Create(CultureInfo.InvariantCulture, $"catchup-item-v2:{channelId}:{start.Ticks}:{itemId:N}"));
 
     private static ChannelItemResult Result(IEnumerable<ChannelItemInfo> items)
     {
