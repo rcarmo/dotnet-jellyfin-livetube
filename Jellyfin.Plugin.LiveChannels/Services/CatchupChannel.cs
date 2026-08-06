@@ -43,7 +43,7 @@ public sealed class CatchupChannel : IChannel, IDisableMediaSourceDisplay, IRequ
     }
 
     /// <inheritdoc />
-    public string Name => "Live Channels Catch-up";
+    public string Name => "Live Channels Catch-up VOD";
 
     /// <inheritdoc />
     public string Description => "Restart and seek recent programmes from the virtual Live TV schedule.";
