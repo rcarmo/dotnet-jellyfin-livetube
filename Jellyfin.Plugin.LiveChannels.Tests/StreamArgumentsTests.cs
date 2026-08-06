@@ -52,11 +52,13 @@ public class StreamArgumentsTests
     {
         var a = StreamArguments.Build("https://media.test/video.mp4", default, default, 1280, 4000, SoftwareH264, "aac", 192, null);
 
-        StreamSessionService.AddOriginalAudioInput(a, "https://media.test/original.m4a?a=1&b=2");
+        StreamSessionService.AddOriginalAudioInput(a, "https://media.test/original.m4a?a=1&b=2", TimeSpan.FromSeconds(123.456));
 
         var audioInput = a.IndexOf("https://media.test/original.m4a?a=1&b=2");
         Assert.True(audioInput > 0);
         Assert.Equal("-i", a[audioInput - 1]);
+        Assert.Equal("123.456", a[audioInput - 2]);
+        Assert.Equal("-ss", a[audioInput - 3]);
         Assert.Contains("1:a:0?", a);
         Assert.DoesNotContain("0:a:0?", a);
     }

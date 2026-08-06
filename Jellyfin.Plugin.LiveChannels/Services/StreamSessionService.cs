@@ -550,11 +550,11 @@ public class StreamSessionService
             }
         }
 
-        // Invidious's local DASH proxy does not support a deep input seek efficiently: ffmpeg walks fragmented
-        // media from the beginning and can produce no frames before the tune-in deadline. Start the current remote
-        // video at its beginning instead, but cap it to the programme's remaining scheduled time so the next guide
-        // boundary and every subsequent item stay aligned. Items reached normally already have a zero offset.
-        var inputOffset = program.IsInvidious ? TimeSpan.Zero : offset;
+        // The old DASH-proxy input could not seek deeply without walking fragments from zero. Explicit signed
+        // video/audio representations support fast byte-range seeking, so tune-in now seeks both inputs to the
+        // same wall-clock offset. The cap remains the slot's remaining duration, preventing any metadata drift
+        // from overrunning the following programme.
+        var inputOffset = offset;
         var inputDurationLimit = durationLimit;
         if (program.IsInvidious && offset > TimeSpan.Zero && durationLimit is null)
         {
@@ -596,7 +596,7 @@ public class StreamSessionService
         var (args, hardwareDecode) = BuildArguments(input, inputOffset, timeline, subtitle, sourceHeight, subtitlePath, softwareDecode: false, program.IsHdr, program.DefaultAudioOrdinal, burstSeconds(), inputDurationLimit, subtitleFonts);
         if (originalAudioInput is not null)
         {
-            AddOriginalAudioInput(args, originalAudioInput);
+            AddOriginalAudioInput(args, originalAudioInput, inputOffset);
         }
 
         var (total, lastOut, exitCode) = await RunFfmpegAsync(ffmpeg, args, program.Title, output, cancellationToken, stats).ConfigureAwait(false);
@@ -609,7 +609,7 @@ public class StreamSessionService
             var (swArgs, _) = BuildArguments(input, inputOffset, timeline, subtitle, sourceHeight, subtitlePath, softwareDecode: true, program.IsHdr, program.DefaultAudioOrdinal, burstSeconds(), inputDurationLimit, subtitleFonts);
             if (originalAudioInput is not null)
             {
-                AddOriginalAudioInput(swArgs, originalAudioInput);
+                AddOriginalAudioInput(swArgs, originalAudioInput, inputOffset);
             }
 
             (total, lastOut, exitCode) = await RunFfmpegAsync(ffmpeg, swArgs, program.Title, output, cancellationToken, stats).ConfigureAwait(false);
@@ -633,7 +633,7 @@ public class StreamSessionService
         return (total > 0, lastOut);
     }
 
-    internal static void AddOriginalAudioInput(List<string> args, string audioUrl)
+    internal static void AddOriginalAudioInput(List<string> args, string audioUrl, TimeSpan offset)
     {
         var outputOption = args.FindIndex(a => a is "-vf" or "-filter_complex" or "-map");
         if (outputOption < 0)
@@ -641,8 +641,16 @@ public class StreamSessionService
             throw new InvalidOperationException("Could not locate ffmpeg output options.");
         }
 
-        args.Insert(outputOption, audioUrl);
-        args.Insert(outputOption, "-i");
+        var audioInput = new List<string>();
+        if (offset > TimeSpan.Zero)
+        {
+            audioInput.Add("-ss");
+            audioInput.Add(offset.TotalSeconds.ToString("F3", CultureInfo.InvariantCulture));
+        }
+
+        audioInput.Add("-i");
+        audioInput.Add(audioUrl);
+        args.InsertRange(outputOption, audioInput);
         for (var i = 0; i < args.Count - 1; i++)
         {
             if (args[i] == "-map" && args[i + 1].StartsWith("0:a:", StringComparison.Ordinal))
