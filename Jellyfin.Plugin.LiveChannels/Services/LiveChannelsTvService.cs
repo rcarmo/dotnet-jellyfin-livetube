@@ -1538,9 +1538,9 @@ public sealed class LiveChannelsTvService : ILiveTvService, ISupportsDirectStrea
             if (!string.IsNullOrEmpty(channel.LogoData))
             {
                 var file = Path.Combine(_logoRoot, number + "-" + Hash(channel.LogoData) + "." + ExtensionFor(channel.LogoContentType));
-                if (!File.Exists(file))
+                if (!LogoCache.IsUsable(file))
                 {
-                    await File.WriteAllBytesAsync(file, Convert.FromBase64String(channel.LogoData), cancellationToken).ConfigureAwait(false);
+                    await LogoCache.WriteAsync(file, Convert.FromBase64String(channel.LogoData), cancellationToken).ConfigureAwait(false);
                 }
 
                 return file;
@@ -1548,7 +1548,7 @@ public sealed class LiveChannelsTvService : ILiveTvService, ISupportsDirectStrea
 
             var token = string.Join('|', channel.Name, ((int)channel.LogoStyle).ToString(CultureInfo.InvariantCulture), channel.LogoSymbol, channel.LogoShowName ? "1" : "0");
             var generated = Path.Combine(_logoRoot, number + "-g6-" + Hash(token) + ".png");
-            if (!File.Exists(generated))
+            if (!LogoCache.IsUsable(generated))
             {
                 var bytes = await _defaultLogo.GetAsync(channel.Number, channel.Name, channel.LogoStyle, channel.LogoSymbol, channel.LogoShowName, cancellationToken).ConfigureAwait(false);
                 if (bytes is null)
@@ -1556,7 +1556,7 @@ public sealed class LiveChannelsTvService : ILiveTvService, ISupportsDirectStrea
                     return null;
                 }
 
-                await File.WriteAllBytesAsync(generated, bytes, cancellationToken).ConfigureAwait(false);
+                await LogoCache.WriteAsync(generated, bytes, cancellationToken).ConfigureAwait(false);
             }
 
             return generated;

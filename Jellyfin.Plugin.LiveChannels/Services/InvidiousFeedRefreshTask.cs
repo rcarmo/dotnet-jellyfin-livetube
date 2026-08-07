@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.LiveChannels.Models;
+using MediaBrowser.Controller.LiveTv;
 using MediaBrowser.Model.Tasks;
 
 namespace Jellyfin.Plugin.LiveChannels.Services;
@@ -13,12 +14,14 @@ public sealed class InvidiousFeedRefreshTask : IScheduledTask
 {
     private readonly ChannelService _channels;
     private readonly InvidiousFeedStore _store;
+    private readonly IGuideManager _guide;
 
     /// <summary>Initializes the source refresh task.</summary>
-    public InvidiousFeedRefreshTask(ChannelService channels, InvidiousFeedStore store)
+    public InvidiousFeedRefreshTask(ChannelService channels, InvidiousFeedStore store, IGuideManager guide)
     {
         _channels = channels;
         _store = store;
+        _guide = guide;
     }
 
     /// <inheritdoc />
@@ -60,12 +63,12 @@ public sealed class InvidiousFeedRefreshTask : IScheduledTask
             progress.Report(sources.Count == 0 ? 50 : 70.0 * (index + 1) / sources.Count);
         }
 
-        foreach (var channel in channels)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            _channels.RefreshPrograms(channel);
-        }
-
+        // Rebuild through Jellyfin's guide manager rather than updating only the plugin's playback cache.
+        // Otherwise a newly inserted feed item changes the epoch-loop index used at tune-in while Jellyfin keeps
+        // advertising the programme list from its previous guide refresh: the visible title is then commonly one
+        // item behind the video that actually plays. GetProgramsAsync rebuilds the same cache as it publishes.
+        progress.Report(75);
+        await _guide.RefreshGuide(progress, cancellationToken).ConfigureAwait(false);
         progress.Report(100);
     }
 
